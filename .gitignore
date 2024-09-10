@@ -1,0 +1,16 @@
+out/
+outputs/
+exports/
+data/*
+!data/
+!data/README.md
+!src/data
+wandb/
+.idea/
+__pycache__
+*/__pycache__
+external/MinkowskiEngine/
+external/co-tracker/
+external/nerfplayer-nerfstudio/
+external/simple-knn/
+external/splatting
