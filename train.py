@@ -13,17 +13,16 @@ from src.utils.load_model import load_model_config, load_data_args
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 def train(args):
-    wandb.init(project="PointFlowNerf", config=args, entity='colton-stearns', resume='allow')  # , resume='must')
-    wandb.mark_preempting()  # lets us respawn task if it fails
+    wandb.init(project="DynamicGaussianMarbles", config=args)
 
     # Set up output directory
     if "sweep" in args.output.lower():
         args.output = os.path.join(args.output, wandb.run.id)
 
     # check if this unique run ID's directory exists. If it does, this means we're respawning a previous run!
-    if osp.exists(args.output) and "sweep" in args.output.lower() and not args.load_dir:
-        setup_wandb_preemptive(args)
-        print("Preempting Sweep Run! Run ID %s" % wandb.run.id)
+    # if osp.exists(args.output) and "sweep" in args.output.lower() and not args.load_dir:
+    #     setup_wandb_preemptive(args)
+    #     print("Preempting Sweep Run! Run ID %s" % wandb.run.id)
 
     # set up training config
     os.makedirs(args.output, exist_ok=True)
