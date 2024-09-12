@@ -1,7 +1,10 @@
 # Dynamic Gaussian Marbles for Novel View Synthesis of Casual Monocular Videos
 
 This is the official implementation for the SIGGRAPH Asia 2024 paper **Dynamic Gaussian Marbles for Novel View Synthesis of Casual Monocular Videos**. [[Paper](https://arxiv.org/pdf/2406.18717)] [[Project Page](https://geometry.stanford.edu/projects/dynamic-gaussian-marbles.github.io/)]
-![DGMarbles Teaser](media/teaser.jpg)
+
+Training View Tracking   |  Novel View Synthesis
+-------------------------|-------------------------
+![](media/cayote-tracking.gif) | ![](media/cayote-teaser.gif)
 
 ## Installation
 
