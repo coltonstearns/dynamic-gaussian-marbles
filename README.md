@@ -44,6 +44,12 @@ For example, `bash setup.sh ~/anaconda3 dgmarbles`
 
 ## Data
 
+### Trying out Your Own Videos!
+For a video of interest, please refer to the [Preprocess Section](./preprocess/README.md) for instructions on converting the
+video into a formatted data directory. After following these steps, you 
+will have a data directory at `data/real-world/your-video-name`, which is ready
+for Dynamic Gaussian Marbles!
+
 ### Downloading Data
 We provide processed datasets that are ready-to-use in the form of zip files.
 
@@ -120,9 +126,6 @@ scene_datadir
 * **`dataset.json`:** A JSON file providing dataset-level information like the number of images and image names.
 </details>
 
-### Running on Your Own Monocular Videos
-Coming soon!
-
 
 ## Evaluating Pretrained Models
 
@@ -146,7 +149,22 @@ For example, to evaluate and render the pretrained Nvidia Balloon1 scene, run:
 
 ##  Training
 
-### Training on Existing Data
+### Training on Your Own Data
+To train on your own data, simply pass your [preprocessed dataset directory](preprocess/README.md) and an appropriate configuration file into `train.py`:
+  ```bash
+  python train.py --data_dir <your_processed_data_dir> --config <config_file>
+  ```
+
+For example, for our coyote teaser video above, we ran the following:
+  ```bash
+  python train.py --data_dir ./data/real-world/coyote --config configs.dgmarbles_realworld
+  ```
+
+By default, `configs.dgmarbles_realworld` will learn Gaussian subsequences of length 32. We recommend this 
+length for the highest quality novel view synthesis. However, for longer subsequences of length 128, you can use `configs.dgmarbles_realworld_128`.
+
+
+### Reproducing our Reported Results 
 To reproduce our provided checkpoints, simply train on a dataset with the appropriate configuration file:
   ```bash
   python train.py --data_dir <data_dir> --config <config_file> --load_dir <checkpoint_directory> --outdir ./out --only_render True
@@ -155,9 +173,6 @@ For example, to train on the Nvidia Balloon1 scene, run:
   ```bash
   python train.py --data_dir ./data/nvidia/Balloon1 --config configs.dgmarbles_nvidia --outdir ./out
   ```
-
-### Training on Your Own Data
-Coming soon!
 
 
 ## Additional Training Arguments
