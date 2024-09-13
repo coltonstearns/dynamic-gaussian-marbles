@@ -132,9 +132,9 @@ scene_datadir
 ### Downloading Checkpoints
 
 We provide the optimized Dynamic Gaussian Marbles for each scene reported in the paper  [here](https://drive.google.com/drive/folders/1k6h3it389Oc0D7qdeTSu2vFMo2bKoW4k?usp=drive_link). 
-Please download the appropriate checkpoints, abd place them into a `checkpoints` directory.
-Please make sure that each checkpoint is within its OWN subdirectory (as our code takes in a directory and searches for
-checkpoints within the directory).
+Please download the appropriate checkpoints, and place them into a `checkpoints` directory.
+Please make sure that each checkpoint is within its OWN subdirectory (as our loader takes in an entire directory and searches for the latest
+checkpoint within that directory).
 
 ### Running Evaluation
 Run the following command to perform evaluation with a downloaded checkpoint:

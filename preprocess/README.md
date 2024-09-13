@@ -10,7 +10,7 @@ We provide the script `00_initialize_directory.sh` to automate this! Simply pass
 path and a name of an output directory:
 
 ```aiignore
-bash 00_initialize_directory <path_to_mp4> ./data/real-world/<video-name>
+bash 00_initialize_directory.sh <path_to_mp4> ./data/real-world/<video-name>
 ```
 
 This will result in a directory formatted as follows:
