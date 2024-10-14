@@ -82,10 +82,6 @@ class GaussianSequence(nn.Module):
                 idxs = torch.randperm(properties.size(0))[:maxpnts]
                 properties = properties[idxs]
 
-        # reorder points by segmentation
-        segmentation_reordering = torch.argsort(properties[:, 7])
-        properties = properties[segmentation_reordering]
-
         # create gaussian splat of dynamic scene
         g = GaussianModel(self.nframes, freeze_frames_of_origin=self.config.freeze_frames_of_origin)
         g.create_from_input_pcd(properties[:, :3], properties[:, 4:7], frameidx=frameidx, segmentation=properties[:, 3])

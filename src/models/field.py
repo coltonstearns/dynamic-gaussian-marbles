@@ -98,6 +98,11 @@ class GaussianField(nn.Module):
         outputs = {}
         outputs.update({'rgb': image.permute(1, 2, 0)})
         outputs.update({'depthmap': render_pkg["depthmap"]})
+
+        # process segmentation for vis
+        if render_pkg["segmentation"].size(-1) < 3:
+            (h, w, nseg), device = render_pkg["segmentation"].shape, render_pkg["segmentation"].device
+            render_pkg["segmentation"] = torch.cat([render_pkg["segmentation"], torch.zeros(h, w, 3 - nseg).to(device)], dim=2)
         outputs.update({'segmentation': render_pkg["segmentation"]})
         return outputs
 

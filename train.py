@@ -5,6 +5,7 @@ from datetime import datetime
 import torch
 import os.path as osp
 import wandb
+import time
 
 from src.utils.load_args import get_argparse_input
 from src.visualization.render import render_trainval, render_video_trajectory
@@ -47,13 +48,19 @@ def train(args):
     trainer.config.max_num_iterations = trainer.config.max_num_iterations - trainer._start_step
 
     # Run trainer
-    if not args.only_render:
+    if not args.only_render and not args.only_interactive_visualize:
         trainer.train()
     print('Finished Training!')
 
     # render training images
     timestamp = "_".join(str(datetime.now()).split(" "))[:-7]
     trainer.pipeline.eval()
+
+    # check if in interactive mode
+    if args.only_interactive_visualize:
+        print("Entering Interactive Visualization.")
+        while True:
+            time.sleep(1)
 
     # compute correspondences in internal representation
     trainer.pipeline.model.compute_correspondences()

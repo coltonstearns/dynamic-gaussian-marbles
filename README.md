@@ -10,8 +10,6 @@ Training View Tracking   |  Novel View Synthesis
 
 > This code has been tested on Ubuntu 20.04 with Python 3.10, CUDA 11.7, and PyTorch 2.0.1.
 
-> This code DOES NOT work with CUDA 12.X due to its dependency on the [FRNN](https://github.com/lxxue/FRNN) package.
-
 
 #### Step 1: Create a Python Environment
 
@@ -25,7 +23,8 @@ conda activate dgmarbles
 **Step 2: Install Dependencies**
 
 The `setup.sh` script installs all necessary dependencies. Simply pass in the location
-of the anaconda base directory as well as the "dgmarbles" environment name:
+of the anaconda base directory as well as the "dgmarbles" environment name. If you are using
+CUDA 12.X, please use the `setup_cuda12.sh` variant.
 
 ```bash
 bash setup.sh <path_to_conda_env> dgmarbles
@@ -35,9 +34,11 @@ For example, `bash setup.sh ~/anaconda3 dgmarbles`
 
 
 **Notes:**
-* We assume CUDA 11.7. For other CUDA versions,  you may need to adjust `setup.sh` accordingly.
+* We have tested `setup.sh` with CUDA 11.7 and `setup_cuda12.sh` with CUDA 12.1. 
 * We assume a standard Linux system with `apt-get` available. If not using Linux, you may need to adjust the script accordingly.
-* Our environment builds off of [NerfStudio](https://github.com/nerfstudio-project/nerfstudio), which, among other things, allows interactive visualization
+* Our environment builds off of [NerfStudio](https://github.com/nerfstudio-project/nerfstudio), which, among other things, allows interactive visualization. However, we do NOT support
+NerfStudio commands (e.g. `ns-train` and `ns-render`). Instead, please refer below for information on 
+training and visualizing models.
 * Our environment assumes the use of [Weight and Biases (wandb)](https://wandb.ai/site). If you do not wish to use wandb, please set the flag `WANDB_MODE=offline` before running code.
 
 
@@ -146,6 +147,13 @@ For example, to evaluate and render the pretrained Nvidia Balloon1 scene, run:
   ```bash
   python train.py --data_dir ./data/nvidia/Balloon1 --config configs.dgmarbles_nvidia --load_dir ./checkpoints/balloon1 --outdir ./out --only_render True
   ```
+
+### Interactive Visualization
+Run the following command to only visualize a model interactively (via NerfStudio):
+  ```bash
+  python train.py --data_dir <data_dir> --config <config_file> --load_dir <checkpoint_directory> --outdir ./out --only_interactive_visualize True
+  ```
+
 
 ##  Training
 

@@ -16,6 +16,7 @@ def get_argparse_input():
                         help='Model config as a python path. Eg "configs.model_configs.xxx')
     parser.add_argument('--output', type=str, default="./out")
     parser.add_argument('--only_render', type=str, default='False')
+    parser.add_argument('--only_interactive_visualize', type=str, default='False')
     parser.add_argument('--load_dir', type=str, default='')
     parser.add_argument('--_wandb', type=str)  # for preemptive jobs
 
@@ -88,6 +89,7 @@ def get_argparse_input():
     args.tracking_loss_per_segment = (args.tracking_loss_per_segment in ["True", "true", "yes", "1"]) or (args.tracking_loss_per_segment is None)  # defaults to True
     args.freeze_frames_of_origin = (args.freeze_frames_of_origin in ["True", "true", "yes", "1"]) or (args.freeze_frames_of_origin is None)  # defaults to True
     args.only_render = args.only_render in ["True", "true", "yes", "1"]  # defaults to False
+    args.only_interactive_visualize = args.only_interactive_visualize in ["True", "true", "yes", "1"]  # defaults to False
     args.isometry_per_segment = (args.isometry_per_segment in ["True", "true", "yes", "1"]) or (args.isometry_per_segment is None)  # defaults to True
 
     # convert some params to float --> set them as str in argparse because wandb passes in "None" as string
