@@ -73,7 +73,7 @@ class GaussianModel(nn.Module):
         for i in range(len(self._delta_xyz)):
             l.append({'params': [self._delta_xyz[i]], 'lr': training_args.delta_position_lr * factor, "name": "delta_xyz_%s" % i})
 
-        self.optimizer = torch.optim.Adam(l, lr=0.0, eps=1e-15)
+        self.optimizer = torch.optim.AdamW(l, lr=0.0, eps=1e-15)
 
     @property
     def get_scaling(self):
@@ -254,7 +254,7 @@ class GaussianModel(nn.Module):
             for seg in unique_segments:
                 seg_mask = self._segmentation == seg
 
-                idxs = torch.nonzero(seg_mask & frame_mask).squeeze()
+                idxs = torch.nonzero(seg_mask & frame_mask).flatten()
                 if idxs.size(0) > min_gaussians:
                     # get number of points to keep
                     percent = idxs.size(0) / N
@@ -514,7 +514,7 @@ class GaussianModel(nn.Module):
         return torch.mean(torch.square(self.scaling_activation(self._scaling[idxs])))
 
     def compute_adjacent_isometry_loss(self, frameidx, KNN=32, knn_radius=0.1, phase='motion-estimation',
-                                      per_segment=True, dropout_idxs=None):
+                                      per_segment=True, dropout_idxs=None, use_l2=False):
         device = self._batch.device
         if self.boundary == -1 or self._xyz.size(0) == 0:
             return torch.zeros(1).to(device)
@@ -543,7 +543,7 @@ class GaussianModel(nn.Module):
 
             # get source xyz
             src_idx = frameidx + 1 if frameidx < self.boundary else frameidx - 1
-            this_errs = self._compute_adjacent_isometry_helper(xyz, src_idx, point_idxs, knn_idxs, mask)
+            this_errs = self._compute_adjacent_isometry_helper(xyz, src_idx, point_idxs, knn_idxs, mask, use_l2)
             errs = torch.cat((errs, this_errs))
 
         else:  # phase is bundle adjust - all active frames have learned mappings
@@ -566,18 +566,19 @@ class GaussianModel(nn.Module):
                     continue
                 point_idxs, knn_idxs = cache
                 point_idxs, knn_idxs = point_idxs.long(), knn_idxs.long()
-                this_errs = self._compute_adjacent_isometry_helper(xyz, src_idx, point_idxs, knn_idxs, mask, valid_mask=valid_mask)
+                this_errs = self._compute_adjacent_isometry_helper(xyz, src_idx, point_idxs, knn_idxs, mask, use_l2, valid_mask=valid_mask)
                 errs = torch.cat((errs, this_errs))
 
         return errs
 
-    def _compute_adjacent_isometry_helper(self, xyz, src_idx, point_idxs, knn_idxs, mask, valid_mask=None):
+    def _compute_adjacent_isometry_helper(self, xyz, src_idx, point_idxs, knn_idxs, mask, use_l2, valid_mask=None):
         # get source distances
         src_xyz = self.get_mapped_means3D(src_idx)  # don't use frozen, due to adjacent isometry
         src_xyz_subset = src_xyz[mask].clone()
         all_idxs = torch.cat([point_idxs, knn_idxs])
         src_gathered = torch.gather(src_xyz_subset, 0, torch.stack([all_idxs, all_idxs, all_idxs], dim=-1)).reshape(2, -1, 3)
         src_neighbor_dists = torch.norm(src_gathered[0] - src_gathered[1], dim=-1).detach().clone()
+        avg_neighbor_dist = src_neighbor_dists.mean().detach().item()
 
         # get current distances
         xyz_subset = xyz[mask].clone()
@@ -591,9 +592,11 @@ class GaussianModel(nn.Module):
             diffs = diffs[dropout_mask]
 
         # get l1 and l2 errors
-        # l2_err = diffs ** 2
-        l1_err = torch.abs(diffs)
-        return l1_err
+        if use_l2:
+            err = diffs**2 / avg_neighbor_dist**2
+        else:
+            err = torch.abs(diffs) / avg_neighbor_dist
+        return err
 
     def _cache_isometry_knn(self, KNN=32, knn_radius=0.1, per_segment=True):
         device = self._xyz.device
@@ -616,6 +619,7 @@ class GaussianModel(nn.Module):
             # check for if foreground Gaussians have 0 points (in one half or the other)
             if xyz_template.size(0) == 0:
                 left_templates.append(None) if frameidx < self.boundary else right_templates.append(None)
+                continue
 
             # append segmentation as additional dim
             seg_template = self._segmentation[valid_gidxs] * knn_radius * 2

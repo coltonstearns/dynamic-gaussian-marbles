@@ -7,8 +7,7 @@ import cv2
 
 SCENE_INFO = \
     {
-        "center": [-0.5, 1.0, -1.75], "far": 0.6,
-        "near": 0.03, "scale": 0.1
+        "far": 0.6, "near": 0.03, "scale": 0.1
     }
 
 

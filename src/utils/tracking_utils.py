@@ -31,11 +31,11 @@ class TrackingLoss(nn.Module):
         self.per_segment = per_segment
 
     def forward(self, src_camera, target_camera,  src_means3D, target_means3D, opacity, scales, segmentation,
-                src_particles, target_particles, particles_seg):
+                src_particles, target_particles, particles_seg, depthmap=None):
 
         # get means and depths for the target frame
         means2D_target, depths_target = get_means_2D(target_means3D, target_camera, return_depths=True)
-        depths_target = depths_target.detach()
+        # depths_target = depths_target.detach()
 
         # get means and depths for the source frame
         means2D_src, depths_src, conical_opacity = get_means_2D(src_means3D, src_camera, opacity, scales,
@@ -78,10 +78,32 @@ class TrackingLoss(nn.Module):
         dists_target = torch.norm(means2D_target_gather - target_particles_gather, dim=-1)
 
         # compute errors
-        errors = torch.abs(dists_target * depths_target_gather - dists_source * depths_src_gather) * influences
+        raw_errors = torch.abs(dists_target * depths_target_gather.detach() - dists_source * depths_src_gather) * influences
+        depth_norms = torch.abs(depths_target_gather.detach() + depths_src_gather) / 2
+        errors = raw_errors / torch.clip(depth_norms, min=0.1)
         particles_idxs_contiguous = torch.unique(particles_idxs, return_inverse=True)[1]
         errors = torch_scatter.scatter_sum(errors, index=particles_idxs_contiguous)
-        return torch.mean(errors)
+
+        # add in direct depth loss - has Gaussian match both 2D motion and depth motion
+        #    Note to self: what if tracking motion is wrong --> we're regularizing these Gaussians to the wrong depth
+        if depthmap is not None:
+            h, w = depthmap.shape
+            target_idxs = torch.round(target_particles_gather).long()
+            idxs_valid = (target_idxs[:, 1] < h) & (target_idxs[:, 0] < w) & (target_idxs[:, 1] >= 0) & (target_idxs[:, 0] >= 0)
+            target_idxs = target_idxs[idxs_valid]
+            depths_target_gather = depths_target_gather[idxs_valid]
+            depthvals = depthmap[target_idxs[:, 1], target_idxs[:, 0]]  # assuming xy format
+
+            ignore_mask = (depths_target_gather == 0) | (depthvals == 0)
+            our_disp, gt_disp = torch.clip(1.0 / depths_target_gather[~ignore_mask], 0, 1/1e-3), torch.clip(1.0 / depthvals[~ignore_mask], 0, 1/1e-3)
+            depth_errors = torch.abs(our_disp - gt_disp) * influences[idxs_valid][~ignore_mask].detach()
+
+            # depth_errors = torch.abs(depths_target_gather - depthvals) * influences[idxs_valid].detach()
+            depth_errors = torch_scatter.scatter_sum(depth_errors, index=particles_idxs_contiguous[idxs_valid][~ignore_mask])
+        else:
+            depth_errors = torch.zeros_like(errors)
+
+        return torch.mean(errors), torch.mean(depth_errors)
 
     @staticmethod
     def _gather_knn(raw_knn_idxs, depths_source, src_particles, means2D_source, conical_opacity, K: int):
@@ -94,6 +116,8 @@ class TrackingLoss(nn.Module):
         depth_knn_order = torch.argsort(depths_source_knn, dim=-1)  # depth-order each pixel's KNN
         knn_idxs = torch.gather(raw_knn_idxs.squeeze(0), 1, depth_knn_order)  # shape (batch_size, K)
         mask = knn_idxs != -1
+        depth_mask = depths_source_knn > 0.01
+        mask = mask & depth_mask
         knn_idxs = knn_idxs[mask]  # MK' x 1
 
         # gather particles
@@ -315,7 +339,8 @@ def get_means_2D(xyz, camera, opacity=None, scales=None, return_depths=False, re
     projected_unhomog = projected_unhomog + camera.full_proj_transform[3:4, :3]
     reg = torch.sum(xyz * camera.full_proj_transform[:3, 3].reshape(1, 3), dim=-1) + camera.full_proj_transform[3, 3]
     projected_homogenous = projected_unhomog / (reg.unsqueeze(-1) + 0.0001)
-    depths = projected_unhomog[:, 2:3]
+    # depths = projected_unhomog[:, 2:3]
+    depths = reg.clone()  # don't do normalized depths
     h, w = camera.image_height, camera.image_width
     projected_homogenous[:, 0] = ((projected_homogenous[:, 0] + 1.0) * w - 1.0) * 0.5  # convert from NDC coords to pixel space
     projected_homogenous[:, 1] = ((projected_homogenous[:, 1] + 1.0) * h - 1.0) * 0.5

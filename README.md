@@ -6,6 +6,10 @@ Training View Tracking   |  Novel View Synthesis
 -------------------------|-------------------------
 ![](media/cayote-tracking.gif) | ![](media/cayote-teaser.gif)
 
+## Changelog
+- Oct. 21st, 2024: v0.2: Better models updated data loading. **Old checkpoints and datasets from v0.1 will not work with this version!** 
+- Sep. 10th, 2024: v0.1: initial release of code.
+
 ## Installation
 
 > This code has been tested on Ubuntu 20.04 with Python 3.10, CUDA 11.7, and PyTorch 2.0.1.
@@ -56,12 +60,12 @@ We provide processed datasets that are ready-to-use in the form of zip files.
 
 | Dataset                    | Google Drive URL                                                                                            | PSNR / LPIPs  |  
 |----------------------------|-------------------------------------------------------------------------------------------------------------|---------------|
-| DyCheck IPhone (with pose) | [here](https://drive.google.com/drive/folders/1K3YSRNx9j7u_Sq86Y1mpqXl7Z2bMvyhE?usp=drive_link)             | 16.72 / 0.418 |              
-| DyCheck IPhone (no pose)   | [here](https://drive.google.com/drive/folders/1cJGkFYPTT4UzSrSlHS6oPhha1bHSaBpn?usp=drive_link)             | 15.79 / 0.428 |              
-| Monocular Nvidia           | [here](https://drive.google.com/drive/folders/1ohVeRHTxd2m6VgMAT5zPXBfjLqRxPtLJ?usp=drive_link)             | 22.32 / 0.129 |               
+| DyCheck IPhone (with pose) | [here](https://drive.google.com/drive/folders/1hKlpqofQt4PhKLWw7kb4tI5CFgJE4Iu-?usp=drive_link)             | 16.72 / 0.418 |              
+| DyCheck IPhone (no pose)   | [here](https://drive.google.com/drive/folders/1iklOhCwbaDB_bNoNFCLfcl7Tx8XIgbU_?usp=drive_link)             | 15.79 / 0.428 |              
+| Monocular Nvidia           | [here](https://drive.google.com/drive/folders/1ax5Ek6olVp_9KVYjjz9r4SdydIVCK4is?usp=drive_link)             | 22.32 / 0.129 |               
 | Total-Recon                | Coming soon!                                                                                                | -- / 0.376    |               
 | Davis                      | Coming soon!                                                                                                | NA / NA       |             
-| YouTube-VOS                | [here](https://drive.google.com/drive/folders/1zZGeXNkGs77uK8c3J2oZZPabH1JxWrc2?usp=drive_link)             | NA / NA       |            
+| YouTube-VOS                | [here](https://drive.google.com/drive/folders/1qRLBwb5qU5yCS1gb06TQieC4_sMHNeTN?usp=drive_link)             | NA / NA       |            
 | Real World                 | Coming soon!                                                                                                | NA / NA       |   
 
 Download each dataset and place the unzipped folder in the `data/` directory. For instance, the Nvidia Dynamic Scenes dataset 
@@ -132,7 +136,7 @@ scene_datadir
 
 ### Downloading Checkpoints
 
-We provide the optimized Dynamic Gaussian Marbles for each scene reported in the paper  [here](https://drive.google.com/drive/folders/1k6h3it389Oc0D7qdeTSu2vFMo2bKoW4k?usp=drive_link). 
+We provide the optimized Dynamic Gaussian Marbles for each scene reported in the paper  [here](https://drive.google.com/drive/folders/1VqGmTZL3uDuHzET0c3_bIJwcKVDTwHac?usp=drive_link). 
 Please download the appropriate checkpoints, and place them into a `checkpoints` directory.
 Please make sure that each checkpoint is within its OWN subdirectory (as our loader takes in an entire directory and searches for the latest
 checkpoint within that directory).

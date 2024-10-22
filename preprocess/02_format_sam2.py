@@ -52,7 +52,7 @@ if __name__ == "__main__":
         success, img = cap.read()
         fno = 0
         while success:
-            img = img.mean(axis=-1) > 254.0
+            img = img.mean(axis=-1) > 235.0
             frame_segmentations[fno].append(img)
             success, img = cap.read()
             fno += 1

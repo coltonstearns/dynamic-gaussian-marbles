@@ -69,6 +69,7 @@ class GaussianSplattingModelConfig(ModelConfig):
     depthmap_loss_weight: float = 0.2
     lpips_loss_weight: float = 0.0
     instance_isometry_loss_weight: float = 2.0
+    tracking_depth_loss_weight: float = 2.0
 
     # loss terms - not used in final model
     velocity_smoothing_loss_weight: float = 0.0
@@ -78,6 +79,8 @@ class GaussianSplattingModelConfig(ModelConfig):
     isometry_knn: int = 32
     isometry_knn_radius: float = 0.3  # change me for synthetic?
     isometry_per_segment: bool = True
+    isometry_use_l2: bool = False
+    isometry_weight_background_factor: float = 1.0
     chamfer_agg_group_ratio: float = 0.125  # when dividing frames into 2 groups, what percentage of frames do we use?
     tracking_window: int = 12
     tracking_knn: int = 32
@@ -252,7 +255,8 @@ class GaussianSplattingModel(Model):
         isometry_loss = torch.zeros(1).to(photometric_loss)
         if self.config.isometry_loss_weight > 0:
             isometry_loss = self.field.compute_isometry_loss(self.config.isometry_knn, self.config.isometry_knn_radius,
-                                                             self.config.isometry_per_segment)
+                                                             self.config.isometry_per_segment, self.config.isometry_use_l2,
+                                                             self.config.isometry_weight_background_factor)
             isometry_loss = self.config.isometry_loss_weight * isometry_loss
 
         # add in chamfer loss
@@ -263,10 +267,13 @@ class GaussianSplattingModel(Model):
 
         # add in tracking loss
         tracking_loss = torch.zeros(1).to(chamfer_loss)
-        if self.config.tracking_loss_weight > 0:
+        tracking_depth_loss = torch.zeros(1).to(chamfer_loss)
+        if self.config.tracking_loss_weight > 0 or self.config.tracking_depth_loss_weight > 0:
             assert dataloader is not None and data_sampler is not None
-            tracking_loss = self.field.compute_tracking_loss(dataloader, data_sampler, self.config.tracking_window)
+            gt_depthmap = batch['depth_image'].squeeze(-1).to(self.device)  # note: if anything is 0, ignore it
+            tracking_loss, tracking_depth_loss = self.field.compute_tracking_loss(dataloader, data_sampler, self.config.tracking_window, gt_depthmap)
             tracking_loss = self.config.tracking_loss_weight * tracking_loss
+            tracking_depth_loss = self.config.tracking_depth_loss_weight * tracking_depth_loss
 
         # add in global rigidity loss
         instance_iso_loss = torch.zeros(1).to(photometric_loss)
@@ -315,7 +322,7 @@ class GaussianSplattingModel(Model):
             scaling_loss = self.config.scaling_loss_weight * scaling_loss
 
         # perform backward pass
-        loss = photometric_loss + isometry_loss + chamfer_loss + tracking_loss + depth_loss + velocity_smoothing_loss + lpips_loss + instance_iso_loss + scaling_loss
+        loss = photometric_loss + isometry_loss + chamfer_loss + tracking_loss + depth_loss + velocity_smoothing_loss + lpips_loss + instance_iso_loss + scaling_loss + tracking_depth_loss
         loss.backward(retain_graph=False)
 
         # record losses
@@ -331,6 +338,7 @@ class GaussianSplattingModel(Model):
         loss_dict["global_rigidity_loss"] = instance_iso_loss
         loss_dict["lpips_loss"] = lpips_loss
         loss_dict["scaling_loss"] = scaling_loss
+        loss_dict["tracking_depth_loss"] = tracking_depth_loss
 
         # log losses into wandb every 10 steps (because there are so many steps)
         global WANDB_LOG_STEP

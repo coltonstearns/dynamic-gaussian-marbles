@@ -44,6 +44,7 @@ def get_argparse_input():
     parser.add_argument('--instance_isometry_loss_weight', type=float)
     parser.add_argument('--scaling_loss_weight', type=float)
     parser.add_argument('--lpips_loss_weight', type=float)
+    parser.add_argument('--tracking_depth_loss_weight', type=float)
 
     # training algorithm hyperparameters
     parser.add_argument('--supervision_downscale', type=int)
@@ -58,6 +59,8 @@ def get_argparse_input():
     parser.add_argument('--isometry_knn', type=int)
     parser.add_argument('--isometry_knn_radius', type=float)
     parser.add_argument('--isometry_per_segment', type=str)
+    parser.add_argument('--isometry_use_l2', type=str)
+    parser.add_argument('--isometry_weight_background_factor', type=float)
 
     # chamfer properties
     parser.add_argument('--chamfer_agg_group_ratio', type=float)
@@ -73,6 +76,7 @@ def get_argparse_input():
 
     # ---------------------------- Data Parameters --------------------------------
     parser.add_argument('--depth_remove_outliers', type=str)
+    parser.add_argument('--outlier_std_ratio', type=float)
     # --------------------------------------------------------------------------------
 
     # --------------------------- Data Parser Parameters ---------------------------
@@ -91,6 +95,7 @@ def get_argparse_input():
     args.only_render = args.only_render in ["True", "true", "yes", "1"]  # defaults to False
     args.only_interactive_visualize = args.only_interactive_visualize in ["True", "true", "yes", "1"]  # defaults to False
     args.isometry_per_segment = (args.isometry_per_segment in ["True", "true", "yes", "1"]) or (args.isometry_per_segment is None)  # defaults to True
+    args.isometry_use_l2 = args.isometry_use_l2 in ["True", "true", "yes", "1"]  # defaults to False
 
     # convert some params to float --> set them as str in argparse because wandb passes in "None" as string
     args.render_background_probability = float(args.render_background_probability) if (args.render_background_probability != "None" and args.render_background_probability is not None) else 0.5

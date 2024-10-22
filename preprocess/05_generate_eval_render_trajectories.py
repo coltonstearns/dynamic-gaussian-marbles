@@ -6,36 +6,6 @@ import numpy as np
 from pathlib import Path
 import math
 
-CAMERA_LOC = np.array([[1, 0, 0, 1.25],
-                       [0, 0, -1, -4.375],
-                       [0, 1, 0, -2.5],
-                       [0, 0, 0, 1]])
-
-CAMERA_LOC_NVIDIA = np.array([[1, 0, 0, -0.51],
-                              [0, 0, -1, -2.14],
-                              [0, 1, 0, -0.02],
-                              [0, 0, 0, 1]])
-
-
-
-# y is in/out, x is left/right, z is up/down
-
-CAMERA_TEMPLATE = {'camera_to_world': [1, 0, 0, 1.25,
-                                       0, 0, -1, -4.375,
-                                       0, 1, 0, -2.5,
-                                       0, 0, 0, 1],
-                    'fov': 50,
-                   'aspect': 1.6461187214611872,
-                   'render_time': 0}
-
-CAMERA_TEMPLATE_NVIDIA = {'camera_to_world': [1, 0, 0, -0.51,
-                                       0, 0, -1, -2.14,
-                                       0, 1, 0, -0.02,
-                                       0, 0, 0, 1],
-                    'fov': 50,
-                   'aspect': 1.6461187214611872,
-                   'render_time': 0}
-
 
 def linear_interpolate_camera(cam1, cam2, nframes):
     out = []

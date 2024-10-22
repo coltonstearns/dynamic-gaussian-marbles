@@ -148,14 +148,15 @@ class GaussianField(nn.Module):
             absgrad=False,
             sparse_grad=False,
             sh_degree=None,
-            render_mode="RGB+D",
+            # render_mode="RGB+D",
+            render_mode="RGB+ED",
             rasterize_mode='classic',
             backgrounds=backgrounds
         )
 
         rgb_render = rendered_image[0, :, :, :3].permute(2, 0, 1).contiguous()
-        seg_render = rendered_image[0, :, :, 3: 3+num_classes]  # .permute(2, 0, 1).contiguous()
-        depth_render = rendered_image[0, :, :, 3+num_classes]
+        seg_render = rendered_image[0, :, :, 3: 3 + num_classes]  # .permute(2, 0, 1).contiguous()
+        depth_render = rendered_image[0, :, :, 3 + num_classes]
         return {"render": rgb_render, "depthmap": depth_render, "segmentation": seg_render}
 
     def optimizer_step(self, step):
@@ -203,14 +204,14 @@ class GaussianField(nn.Module):
             self.background_field.step_motion_scope()
 
     # ========================================= LOSSES ============================================
-    def compute_isometry_loss(self, knn, knn_radius, per_segment):
+    def compute_isometry_loss(self, knn, knn_radius, per_segment, use_l2, background_factor):
         errs = torch.zeros(1).to(self.background_clr.device)
         if self.learning_foreground:
-            foreground_errs = self.foreground_field.compute_isometry_loss(knn, knn_radius, per_segment)
+            foreground_errs = self.foreground_field.compute_isometry_loss(knn, knn_radius, per_segment, use_l2)
             errs = torch.cat([errs, foreground_errs], dim=0)
         if self.learning_background and not self.config.static_background and not self.config.no_background:
-            bkgrnd_errs = self.background_field.compute_isometry_loss(knn, knn_radius, per_segment)
-            errs = torch.cat([errs, bkgrnd_errs], dim=0)
+            bkgrnd_errs = self.background_field.compute_isometry_loss(knn, knn_radius, per_segment, use_l2)
+            errs = torch.cat([errs, bkgrnd_errs * background_factor], dim=0)
         return errs.mean()
 
     def compute_chamfer_loss(self, agg_group_ratio):
@@ -245,7 +246,7 @@ class GaussianField(nn.Module):
             loss += self.background_field.compute_instance_isometry_loss(num_pairs)
         return loss
 
-    def compute_tracking_loss(self, dataloader, datasampler, window=16):
+    def compute_tracking_loss(self, dataloader, datasampler, window=16, gt_depthmap=None):
         # load foreground info
         target_fidx = self._time
         target_camera = self._viewpoint_camera
@@ -287,9 +288,10 @@ class GaussianField(nn.Module):
         if src_xyz.size(0) == 0:
             return torch.zeros(1).to(device)
 
-        tracking_loss = self.tracking_loss(src_camera, target_camera, src_xyz, target_xyz, opacity, scales,
-                                           segmentation, src_particles, target_particles, src_track_seg)
-        return tracking_loss
+        tracking_loss, depth_loss = self.tracking_loss(src_camera, target_camera, src_xyz, target_xyz, opacity, scales,
+                                                       segmentation, src_particles, target_particles, src_track_seg,
+                                                       gt_depthmap)
+        return tracking_loss, depth_loss
 
     # ========================================= OTHER FUNCTIONS ============================================
     def upsample_gaussians(self, factor, fgbg):

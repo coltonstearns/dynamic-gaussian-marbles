@@ -24,7 +24,8 @@ class SceneFlowDataset(InputDataset):
 
     def __init__(self, dataparser_outputs: DataparserOutputs,
                  scale_factor: float = 1.0,
-                 depth_remove_outliers: bool = False
+                 depth_remove_outliers: bool = False,
+                 outlier_std_ratio: float = 2.0
                  ):
         super().__init__(dataparser_outputs, scale_factor)
         assert (
@@ -44,12 +45,11 @@ class SceneFlowDataset(InputDataset):
         self.segmentation_filenames = self.metadata["segmentation_filenames"]
         self.nframes = dataparser_outputs.metadata["nframes"]
         self.far_plane = dataparser_outputs.metadata["far"]
-        self.alpha_color = dataparser_outputs.alpha_color
-        self.dataset_source = dataparser_outputs.metadata['source']
         self.split = dataparser_outputs.metadata['split']
 
         # options for filtering input depth maps up-front (used for Dy-Check data)
         self.depth_remove_outliers = depth_remove_outliers
+        self.outlier_std_ratio = outlier_std_ratio
 
     def get_data(self, image_idx: int) -> Dict:
         """Returns the ImageDataset data as a dictionary.
@@ -57,14 +57,13 @@ class SceneFlowDataset(InputDataset):
         Args:
             image_idx: The image index in the dataset.
         """
-        image = self.get_image(image_idx)
+        image = self.get_image(image_idx)[:, :, :3]  # ignore alpha channel
         data = {"image_idx": image_idx, "image": image}
         if self.mask_filenames is not None:
             mask_filepath = self.mask_filenames[image_idx]
             foreground_mask = self.get_foreground_mask(mask_filepath)
             foreground_mask = foreground_mask.astype(bool)
             data["valid_mask"] = foreground_mask
-            # image[~foreground_mask] = self.alpha_color
 
         metadata = self.get_metadata(data)
         data.update(metadata)
@@ -99,16 +98,9 @@ class SceneFlowDataset(InputDataset):
         filepath = self.depth_filenames[data["image_idx"]]
         height = int(self._dataparser_outputs.cameras.height[data["image_idx"]])
         width = int(self._dataparser_outputs.cameras.width[data["image_idx"]])
-        if self.dataset_source == 'point-odyssey':
-            depth_img = self.get_depth_image_from_png(filepath, height, width)
-            depth_img *= self.depth_unit_scale_factor
-        elif self.dataset_source == 'dycheck':
-            # Scale depth images to meter units and also by scaling applied to cameras
-            depth_img = get_depth_image_from_path(
-                filepath=filepath, height=height, width=width, scale_factor=self.depth_unit_scale_factor
-            )
-        else:
-            raise RuntimeError("Dataset source must be point odyssey or dycheck")
+        depth_img = get_depth_image_from_path(
+            filepath=filepath, height=height, width=width, scale_factor=self.depth_unit_scale_factor
+        )
 
         # clip depth to far plane
         depth_img[depth_img.isnan()] = 0
@@ -169,21 +161,14 @@ class SceneFlowDataset(InputDataset):
             height = int(self._dataparser_outputs.cameras.height[i])
             width = int(self._dataparser_outputs.cameras.width[i])
             image = self.get_image(i)
-            if self.dataset_source == 'point-odyssey':
-                depth_img = self.get_depth_image_from_png(depth_fname, height, width)
-                depth_img *= self.depth_unit_scale_factor
-                depth_img = depth_img.squeeze(-1)
-                foreground_mask = self.get_foreground_mask(self.mask_filenames[i])
-            else:  # self.dataset_source == 'dycheck':
-                # Scale depth images to meter units and also by scaling applied to cameras
-                depth_img = get_depth_image_from_path(
-                    filepath=depth_fname, height=height, width=width, scale_factor=self.depth_unit_scale_factor
-                )
-                depth_img = depth_img.squeeze(-1)
-                foreground_mask = depth_img > 0
-                if self.mask_filenames is not None:
-                    additional_mask = self.get_foreground_mask(self.mask_filenames[i])
-                    foreground_mask &= additional_mask
+            depth_img = get_depth_image_from_path(
+                filepath=depth_fname, height=height, width=width, scale_factor=self.depth_unit_scale_factor
+            )
+            depth_img = depth_img.squeeze(-1)
+            foreground_mask = depth_img > 0
+            if self.mask_filenames is not None:
+                additional_mask = self.get_foreground_mask(self.mask_filenames[i])
+                foreground_mask &= additional_mask
 
             # get segmentation mask
             segmentation = torch.from_numpy(np.load(str(self.segmentation_filenames[i])))
@@ -199,7 +184,7 @@ class SceneFlowDataset(InputDataset):
             if self.depth_remove_outliers:
                 pcd = o3d.geometry.PointCloud()
                 pcd.points = o3d.utility.Vector3dVector(pc.cpu().numpy())
-                pcd, ind = pcd.remove_statistical_outlier(nb_neighbors=20, std_ratio=2.0)
+                pcd, ind = pcd.remove_statistical_outlier(nb_neighbors=20, std_ratio=self.outlier_std_ratio)
                 segmentation = segmentation[ind]
                 rgb = rgb[ind]
                 depth = depth[ind]

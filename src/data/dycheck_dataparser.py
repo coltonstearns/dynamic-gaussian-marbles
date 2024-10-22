@@ -18,85 +18,12 @@ from nerfstudio.data.dataparsers.base_dataparser import (
     DataparserOutputs,
 )
 from nerfstudio.data.scene_box import SceneBox
-from nerfstudio.utils.colors import get_color
 from nerfstudio.utils.io import load_from_json
 from nerfstudio.utils.rich_utils import CONSOLE
 
 
-def downscale(img, scale: int) -> np.ndarray:
-    """Function from DyCheck's repo. Downscale an image.
 
-    Args:
-        img: Input image
-        scale: Factor of the scale
-
-    Returns:
-        New image
-    """
-    if scale == 1:
-        return img
-    height, width = img.shape[:2]
-    if height % scale > 0 or width % scale > 0:
-        raise ValueError(f"Image shape ({height},{width}) must be divisible by the" f" scale ({scale}).")
-    out_height, out_width = height // scale, width // scale
-    resized = cv2.resize(img, (out_width, out_height), cv2.INTER_AREA)  # type: ignore
-    return resized
-
-
-def upscale(img, scale: int) -> np.ndarray:
-    """Function from DyCheck's repo. Upscale an image.
-
-    Args:
-        img: Input image
-        scale: Factor of the scale
-
-    Returns:
-        New image
-    """
-    if scale == 1:
-        return img
-    height, width = img.shape[:2]
-    out_height, out_width = height * scale, width * scale
-    resized = cv2.resize(img, (out_width, out_height), cv2.INTER_AREA)  # type: ignore
-    return resized
-
-
-def rescale(img, scale_factor: float, interpolation: int = cv2.INTER_AREA) -> np.ndarray:
-    """Function from DyCheck's repo. Rescale an image.
-
-    Args:
-        img: Input image
-        scale: Factor of the scale
-        interpolation: Interpolation method in opencv
-
-    Returns:
-        New image
-    """
-    scale_factor = float(scale_factor)
-    if scale_factor <= 0.0:
-        raise ValueError("scale_factor must be a non-negative number.")
-    if scale_factor == 1.0:
-        return img
-
-    height, width = img.shape[:2]
-    if scale_factor.is_integer():
-        return upscale(img, int(scale_factor))
-
-    inv_scale = 1.0 / scale_factor
-    if inv_scale.is_integer() and (scale_factor * height).is_integer() and (scale_factor * width).is_integer():
-        return downscale(img, int(inv_scale))
-
-    print(f"Resizing image by non-integer factor {scale_factor}, this may lead to artifacts.")
-    height, width = img.shape[:2]
-    out_height = math.ceil(height * scale_factor)
-    out_height -= out_height % 2
-    out_width = math.ceil(width * scale_factor)
-    out_width -= out_width % 2
-
-    return cv2.resize(img, (out_width, out_height), interpolation)  # type: ignore
-
-
-def _load_scene_info(data_dir: Path) -> Tuple[np.ndarray, float, float, float]:
+def _load_scene_info(data_dir: Path) -> Tuple[float, float, float]:
     """Function from DyCheck's repo. Load scene info from json.
 
     Args:
@@ -106,42 +33,11 @@ def _load_scene_info(data_dir: Path) -> Tuple[np.ndarray, float, float, float]:
         A tuple of scene info: center, scale, near, far
     """
     scene_dict = load_from_json(data_dir / "scene.json")
-    center = np.array(scene_dict["center"], dtype=np.float32)
     scale = scene_dict["scale"]
     near = scene_dict["near"]
     far = scene_dict["far"]
-    return center, scale, near, far
+    return scale, near, far
 
-
-def _rescale_depth(depth_raw: np.ndarray, cam: Dict) -> np.ndarray:
-    """Depth rescale function from DyCheck.
-
-    Args:
-        depth: A numpy ndarray of the raw depth
-        cam: Dict of the camera
-
-    Returns:
-        A numpy ndarray of the processed depth
-    """
-    xx, yy = np.meshgrid(np.arange(cam["width"], dtype=np.float32), np.arange(cam["height"], dtype=np.float32))
-    pixels = np.stack([xx, yy], axis=-1)
-    batch_shape = pixels.shape[:-1]
-    pixels = np.reshape(pixels, (-1, 2))
-    y = (pixels[..., 1] - cam["cy"]) / cam["fy"]
-    x = (pixels[..., 0] - cam["cx"]) / cam["fx"]
-    # x = (pixels[..., 0] - self.principal_point_x - y * self.skew) / self.scale_factor_x
-    # assume skew = 0
-    viewdirs = np.stack([x, y, np.ones_like(x)], axis=-1)
-    local_viewdirs = viewdirs / np.linalg.norm(viewdirs, axis=-1, keepdims=True)
-    viewdirs = (cam["camera_to_worlds"][:3, :3] @ local_viewdirs[..., None])[..., 0]
-    viewdirs /= np.linalg.norm(viewdirs, axis=-1, keepdims=True)
-    viewdirs = viewdirs.reshape((*batch_shape, 3))
-    cosa = viewdirs @ (cam["camera_to_worlds"][:, 2])
-    if depth_raw.ndim == cosa.ndim:
-        depth = depth_raw[..., None] / cosa[..., None]
-    else:
-        depth = depth_raw / cosa[..., None]
-    return depth
 
 
 @dataclass
@@ -152,15 +48,12 @@ class DycheckDataParserConfig(DataParserConfig):
     """target class to instantiate"""
     data: Path = Path("data/iphone/mochi-high-five")
     """Directory specifying location of data."""
-    scale_factor: float = 4.0
-    """How much to scale the camera origins by."""
-    alpha_color: str = "white"
-    """alpha color of background"""
     downscale_factor: int = 1
     """How much to downscale images."""
-    scene_box_bound: float = 1.5
+    scene_box_bound: float = 5
     """Boundary of scene box."""
-    dataset_source: str = "dycheck"
+    """ For DGMarbles, we most of our content to roughly be within [0, 5] depth range; 
+    but some can extend to [5,10]. No more than 10!"""
 
 
 @dataclass
@@ -173,29 +66,15 @@ class Dycheck(DataParser):
     def __init__(self, config: DycheckDataParserConfig):
         super().__init__(config=config)
         self.data: Path = config.data
-        self.alpha_color = config.alpha_color
 
-        # get all scale factors
-        self.scale_factor: float = config.scale_factor
-        self.dycheck_scale_factor = None
-
-        # load extra info from "extra.json"
+        # load information on frames in scene, as well as its scaling, near plane, and far plane
         data_info = load_from_json(self.data / "dataset.json")
         self._num_frames = data_info['num_exemplars']
-        self._center, self._scale, self._near, self._far = _load_scene_info(self.data)
+        self._scale, self._near, self._far = _load_scene_info(self.data)
 
     def _generate_dataparser_outputs(self, split="train"):
-        if self.alpha_color is not None:
-            alpha_color_tensor = get_color(self.alpha_color)
-        else:
-            alpha_color_tensor = None
         data_dir = self.data if split in ["train", "val"] else self.data / split  # covers virtual viewpoints
         splits_dir = data_dir / "splits"
-
-        # scale the scene to fill the aabb bbox
-        sf = self.config.scene_box_bound / 4 / (self._scale * self._far)
-        self.dycheck_scale_factor = sf
-        CONSOLE.print(f"Dycheck scale factor is {self.dycheck_scale_factor}")
 
         if not (splits_dir / f"{split}.json").exists():
             CONSOLE.print(f"split {split} not found, using split train")
@@ -204,7 +83,6 @@ class Dycheck(DataParser):
         frame_names = np.array(split_dict["frame_names"])
         time_ids = np.array(split_dict["time_ids"])
 
-        nframes = self._num_frames  # len(frame_names.tolist())
         image_filenames, depth_filenames, trajectory_filenames, gt_trajectories, cams, evalmask_filenames, mask_filenames, segmentation_filenames = self.process_frames(frame_names.tolist(), time_ids, split)
 
         scene_box = SceneBox(
@@ -215,28 +93,25 @@ class Dycheck(DataParser):
         cam_dict = {}
         for k in cams[0].keys():
             cam_dict[k] = torch.stack([torch.as_tensor(c[k]) for c in cams], dim=0)
-        cam_dict['metadata'] = {'nframes': torch.tensor([nframes for i in range(50)])}
+        cam_dict['metadata'] = {'nframes': torch.tensor([self._num_frames for i in range(50)])}
         cameras = Cameras(camera_type=CameraType.PERSPECTIVE, **cam_dict)
 
-        scale = self._scale * self.dycheck_scale_factor * self.scale_factor
         dataparser_outputs = DataparserOutputs(
             image_filenames=image_filenames,
             cameras=cameras,
-            alpha_color=alpha_color_tensor,
             scene_box=scene_box,
             metadata={
                 "depth_filenames": depth_filenames,
-                "depth_unit_scale_factor": scale,
-                "camera_translation": self._center,
-                "near": self._near * scale,
-                "far": self._far * scale * 10,  # we artificially scale by 10x to fit all gaussians
+                "depth_unit_scale_factor": self._scale,
+                "near": self._near * self._scale,
+                "far": self._far * self._scale,
 
                 # add my additional inputs to metadata field
                 "segmentation_filenames": segmentation_filenames,
                 "gt_tracks": gt_trajectories,
                 "mask_filenames": None if len(mask_filenames) == 0 else mask_filenames,
                 "tracks_filenames": trajectory_filenames,
-                "nframes": nframes,
+                "nframes": self._num_frames,
                 "source": 'dycheck',
                 "split": split,
                 "evalmask_filenames": evalmask_filenames
@@ -274,39 +149,22 @@ class Dycheck(DataParser):
             cam_json = load_from_json(data_dir / f"camera/{frame}.json")
             w2c = torch.as_tensor(cam_json["orientation"])  # w2c really
             position = torch.as_tensor(cam_json["position"])  # location of camera in world space
-            position -= self._center  # some scenes look weird (wheel)
-            position *= self._scale * self.dycheck_scale_factor * self.scale_factor
+            position *= self._scale
             pose = torch.zeros([3, 4])
 
-            # IF IN DYCHECK, FORMAT AS FOLLOWS:
-            if self.config.dataset_source == "dycheck":
-                pose[:3, :3] = w2c.T  # dycheck stores rotation in world-to-camera
-                pose[:3, 3] = position  # position is already in c2w, as it specifies camera's location in world space
+            # REFORMAT AS FOLLOWS:
+            pose[:3, :3] = w2c.T  # dycheck stores rotation in world-to-camera
+            pose[:3, 3] = position  # position is already in c2w, as it specifies camera's location in world space
 
-                # First, everything nerfstudio passes us is in OpenGL camera coordinates. This transforms them
-                #  into OpenCV camera coordinates. Because' it's applied before the rotation, it's column operations
-                pose[0:3, 1:3] *= -1  # todo: this is unnecessary, but deeply buried in my code somewhere!
+            # First, everything nerfstudio passes us is in OpenGL camera coordinates. This transforms them
+            #  into OpenCV camera coordinates. Because' it's applied before the rotation, it's column operations
+            pose[0:3, 1:3] *= -1  # todo: this is unnecessary, but deeply buried in my code somewhere!
 
-                # Also, this suggests that DyCheck is in OpenGL actually
-                # After applying the rotation and translation, we'll be in an opencv world space,
-                # with (x-right, y-down, and z-forward). For visualization, we want (x-right, y-forward, z-up)
-                pose[2, :] *= -1  # invert world z
-                pose = pose[[0, 2, 1], :]  # switch y and z
-
-            else:  # FOR COLMAP, FORMAT THIS WAY: We've now organized nvidia as dycheck, so nothing uses this
-                # pose[:3, :3] = c2w.T  # from w2c to c2w
-                # pose[:3, 3] = -position  # position is already in c2w AND opengl format
-                # pose[:3, 3] = - c2w.T @ position  # go from world to camera space
-
-                # our input is in opencv coord system, which is x-right, y-down, and z-forward
-                # for visualization purposes, we want x-right, y-forward, and z-up
-                # pose = pose[[0, 2, 1], :]  # flip y and z
-                # pose[2, :] *= -1  # invert z to become up
-
-                pose[:3, :3] = w2c
-                pose[:3, 3] = position
-                pose = pose[[0, 2, 1], :]
-                pose[2, :] *= -1
+            # Also, this suggests that DyCheck is in OpenGL actually
+            # After applying the rotation and translation, we'll be in an opencv world space,
+            # with (x-right, y-down, and z-forward). For visualization, we want (x-right, y-forward, z-up)
+            pose[2, :] *= -1  # invert world z
+            pose = pose[[0, 2, 1], :]  # switch y and z
 
             cams.append(
                 {

@@ -394,11 +394,16 @@ class GaussianSequence(nn.Module):
             if g2 is None:
                 g_merge = g1
             else:
+                # perform merge
                 g_merge = GaussianModel(self.nframes, freeze_frames_of_origin=self.config.freeze_frames_of_origin)
                 g_merge.merge_two_gaussian_sets(g1, g2)
+
+                # interesting: doing this after global adjust, and NOT after motion est helps on DyCheck!
                 if self.config.prune_points:
                     g_merge.prune_points(min_opacity=0.02, min_size=0.002)
                 g_merge.downsample(self.maxpoints)
+
+                # set up each gaussian
                 g_merge.training_setup(self.config)
             new_gaussians.append(g_merge)
         self.gaussians = new_gaussians
@@ -431,12 +436,13 @@ class GaussianSequence(nn.Module):
     # ========================================= LOSS FUNCTIONS =========================================
     # ==================================================================================================
 
-    def compute_isometry_loss(self, knn, knn_radius, per_segment):
+    def compute_isometry_loss(self, knn, knn_radius, per_segment, use_l2):
         gaussian_idx = self._gaussian_idxs[0]
         g = self.gaussians[gaussian_idx]
         phase = PHASE_NAMES[self.phase.item()]
         isometry_loss = g.compute_adjacent_isometry_loss(self._time, KNN=knn, knn_radius=knn_radius, phase=phase,
-                                                         per_segment=per_segment, dropout_idxs=self._dropout_idxs[0])
+                                                         per_segment=per_segment, dropout_idxs=self._dropout_idxs[0],
+                                                         use_l2=use_l2)
         return isometry_loss
 
     def compute_chamfer_loss(self, agg_group_ratio):

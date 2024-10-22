@@ -6,7 +6,7 @@ condapath=$2
 curdir=$(pwd)
 directory=$(realpath $directory)
 source $condapath/bin/activate
-conda activate dynamic-gaussian-marbles
+conda activate dgmarbles
 
 # run depth estimation
 cd external/Depth-Anything-V2/metric_depth

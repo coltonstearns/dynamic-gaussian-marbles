@@ -52,6 +52,7 @@ class GaussianSplattingDataManagerConfig(DataManagerConfig):
 
     # our parameters
     depth_remove_outliers: bool = False
+    outlier_std_ratio: float = 2.0
     znear: float = 0.01
     zfar: float = 100.0
 
@@ -125,7 +126,8 @@ class GaussianSplattingDataManager(DataManager):
         return SceneFlowDataset(
             dataparser_outputs=dataparser_outputs,
             scale_factor=camera_res_scale_factor,
-            depth_remove_outliers=self.config.depth_remove_outliers
+            depth_remove_outliers=self.config.depth_remove_outliers,
+            outlier_std_ratio=self.config.outlier_std_ratio,
         )
 
     def setup_train(self):

@@ -7,10 +7,11 @@ BACKGROUND_ARGS_OVERWRITE = ['static_background', 'no_background', 'render_backg
 LOSS_ARGS_OVERWRITE = ['isometry_loss_weight', 'chamfer_loss_weight',
                        'photometric_loss_weight', 'tracking_loss_weight', 'segmentation_loss_weight',
                        'velocity_smoothing_loss_weight', 'depthmap_loss_weight', 'scaling_loss_weight',
-                       'instance_isometry_loss_weight', 'lpips_loss_weight']
+                       'instance_isometry_loss_weight', 'lpips_loss_weight', 'tracking_depth_loss_weight']
 ALGORITHM_ARGS_OVERWRITE = ['number_of_gaussians', 'frame_transport_dropout', 'supervision_downscale', 'prune_points',
                            'freeze_previous_in_motion_estimation',  'freeze_frames_of_origin', 'downsample_reducescale']
-ISOMETRY_ARGS_OVERWRITE = ['isometry_knn', 'isometry_knn_radius', 'isometry_per_segment']
+ISOMETRY_ARGS_OVERWRITE = ['isometry_knn', 'isometry_knn_radius', 'isometry_per_segment', 'isometry_use_l2',
+                           'isometry_weight_background_factor']
 CHAMFER_ARGS_OVERWRITE = ['chamfer_agg_group_ratio']
 TRACKING_ARGS_OVERWRITE = ['tracking_knn', 'tracking_radius',  'tracking_loss_per_segment', 'tracking_window']
 RIGIDITY_ARGS_OVERWRITE = ['instance_isometry_numpairs']
@@ -18,7 +19,7 @@ RIGIDITY_ARGS_OVERWRITE = ['instance_isometry_numpairs']
 # get argument overwrite for each part of model
 MODEL_ARGS_OVERWRITE = LR_ARGS_OVERWRITE + BACKGROUND_ARGS_OVERWRITE + LOSS_ARGS_OVERWRITE + ALGORITHM_ARGS_OVERWRITE +\
                  ISOMETRY_ARGS_OVERWRITE + CHAMFER_ARGS_OVERWRITE + TRACKING_ARGS_OVERWRITE + RIGIDITY_ARGS_OVERWRITE
-DATA_ARGS_OVERWRITE = ['depth_remove_outliers']
+DATA_ARGS_OVERWRITE = ['depth_remove_outliers', 'outlier_std_ratio']
 PIPELINE_ARGS_OVERWRITE = []
 DATAPARSER_ARGS_OVERWRITE = ['downscale_factor']
 
