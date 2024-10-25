@@ -32,6 +32,7 @@ def get_argparse_input():
     parser.add_argument('--static_background', type=str)
     parser.add_argument('--no_background', type=str)
     parser.add_argument('--render_background_probability', type=str)
+    parser.add_argument('--pretrained_background', type=str)
 
     # loss weights
     parser.add_argument('--isometry_loss_weight', type=float)

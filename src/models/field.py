@@ -23,20 +23,23 @@ class GaussianField(nn.Module):
             config,
             point_clouds: list[TensorType],
             background: Tensor = torch.tensor([1.0, 1.0, 1.0]),
-            background_cls: Tensor = torch.tensor([0])
+            background_cls: Tensor = torch.tensor([0]),
+            pretrained_background: str = '',
+            scene_scale=1.0
     ) -> None:
         super().__init__()
 
-        if not config.no_background:
-            foreground_cls = torch.tensor(list({i for i in range(16)} - set(background_cls.cpu().numpy().tolist())))
-        else:
-            foreground_cls = torch.tensor(list({i for i in range(16)}))
+        # if not config.no_background:
+        foreground_cls = torch.tensor(list({i for i in range(16)} - set(background_cls.cpu().numpy().tolist())))
+        # else:
+        #     foreground_cls = torch.tensor(list({i for i in range(16)}))
         self.foreground_field = GaussianSequence(num_images, config, point_clouds, config.number_of_gaussians, foreground_cls)
         if config.no_background:
             self.background_field = None
         elif config.static_background:
             num_background_pts = config.number_of_gaussians - self.foreground_field.maxpoints
-            self.background_field = GaussianStaticScene(config, point_clouds, num_background_pts, background_cls)
+            self.background_field = GaussianStaticScene(config, point_clouds, num_background_pts, background_cls,
+                                                        pretrained_ckpt=pretrained_background, scene_scale=scene_scale)
         else:
             self.background_field = GaussianSequence(num_images, config, point_clouds, config.number_of_gaussians, background_cls)
 
@@ -88,7 +91,7 @@ class GaussianField(nn.Module):
 
         # if we're not rendering background gaussians, set scene background to either black or white
         rand_clr = torch.ones(3).to(device) if np.random.random() < 0.5 else torch.ones(3).to(device)
-        self._tmp_background_clr = self.background_clr if self._render_background or self.config.no_background else rand_clr
+        self._tmp_background_clr = self.background_clr if self._render_background else rand_clr
 
         # forward pass through rendering module
         render_pkg = self.render(viewpoint_cam, gproperties, background_clr=self._tmp_background_clr)
@@ -276,7 +279,7 @@ class GaussianField(nn.Module):
         src_camera = src_camera.to(device)
         src_tracks = src_batch['tracks'].float().to(device)
         src_track_seg = src_batch['tracks_segmentations'].float().to(device)
-        if self.config.static_background and not self.config.no_background:  # remove background tracks
+        if self.config.static_background or self.config.no_background:  # remove background tracks
             src_tracks = src_tracks[:, src_track_seg != 0]
             src_track_seg = src_track_seg[src_track_seg != 0]
 
@@ -306,3 +309,48 @@ class GaussianField(nn.Module):
             means2D_background = self.background_field.get_means_2D(frameidx, camera)
             means2D = torch.cat([means2D, means2D_background], dim=0)
         return means2D
+
+    def eval(self):
+        r"""Sets the module in evaluation mode.
+
+        This has any effect only on certain modules. See documentations of
+        particular modules for details of their behaviors in training/evaluation
+        mode, if they are affected, e.g. :class:`Dropout`, :class:`BatchNorm`,
+        etc.
+
+        This is equivalent with :meth:`self.train(False) <torch.nn.Module.train>`.
+
+        See :ref:`locally-disable-grad-doc` for a comparison between
+        `.eval()` and several similar mechanisms that may be confused with it.
+
+        Returns:
+            Module: self
+        """
+        self.foreground_field.eval()
+        self.background_field.eval()
+        return self.train(False)
+
+    def train(self, mode: bool = True):
+        r"""Sets the module in training mode.
+
+        This has any effect only on certain modules. See documentations of
+        particular modules for details of their behaviors in training/evaluation
+        mode, if they are affected, e.g. :class:`Dropout`, :class:`BatchNorm`,
+        etc.
+
+        Args:
+            mode (bool): whether to set training mode (``True``) or evaluation
+                         mode (``False``). Default: ``True``.
+
+        Returns:
+            Module: self
+        """
+        if not isinstance(mode, bool):
+            raise ValueError("training mode is expected to be boolean")
+        self.training = mode
+        for module in self.children():
+            module.train(mode)
+        self.foreground_field.train(mode)
+        self.background_field.train(mode)
+        return self
+

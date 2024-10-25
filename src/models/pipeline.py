@@ -250,9 +250,10 @@ class GaussianSplattingPipeline(VanillaPipeline):
                 fps = 1 / (time() - inner_start)
 
                 # simple empty-space inpainting technique that boosts metrics
-                inpainted_rgb, moving_average = self._inpaint_empty(
-                    outputs['rgb'], outputs['segmentation'], moving_average=moving_average, moving_average_pct=0.4)
-                outputs['rgb'] = inpainted_rgb
+                if not self.model.config.no_background:
+                    inpainted_rgb, moving_average = self._inpaint_empty(
+                        outputs['rgb'], outputs['segmentation'], moving_average=moving_average, moving_average_pct=0.4)
+                    outputs['rgb'] = inpainted_rgb
 
                 # get compute metrics
                 metrics_dict, _ = self.model.get_image_metrics_and_images(outputs, batch)
@@ -495,3 +496,45 @@ class GaussianSplattingPipeline(VanillaPipeline):
         model_path = os.path.join(load_path, latest_checkpoint)
         loaded_state = torch.load(model_path, map_location=self.device)['pipeline']
         self.model.populate_background_field(loaded_state)
+
+    def eval(self):
+        r"""Sets the module in evaluation mode.
+
+        This has any effect only on certain modules. See documentations of
+        particular modules for details of their behaviors in training/evaluation
+        mode, if they are affected, e.g. :class:`Dropout`, :class:`BatchNorm`,
+        etc.
+
+        This is equivalent with :meth:`self.train(False) <torch.nn.Module.train>`.
+
+        See :ref:`locally-disable-grad-doc` for a comparison between
+        `.eval()` and several similar mechanisms that may be confused with it.
+
+        Returns:
+            Module: self
+        """
+        self._model.eval()
+        return self.train(False)
+
+    def train(self, mode: bool = True):
+        r"""Sets the module in training mode.
+
+        This has any effect only on certain modules. See documentations of
+        particular modules for details of their behaviors in training/evaluation
+        mode, if they are affected, e.g. :class:`Dropout`, :class:`BatchNorm`,
+        etc.
+
+        Args:
+            mode (bool): whether to set training mode (``True``) or evaluation
+                         mode (``False``). Default: ``True``.
+
+        Returns:
+            Module: self
+        """
+        if not isinstance(mode, bool):
+            raise ValueError("training mode is expected to be boolean")
+        self.training = mode
+        for module in self.children():
+            module.train(mode)
+        self._model.train(mode)
+        return self

@@ -59,6 +59,7 @@ class GaussianSplattingModelConfig(ModelConfig):
     no_background: bool = False
     static_background: bool = False
     render_background_probability: float = 0.25
+    pretrained_background: str = ''
 
     # loss terms
     isometry_loss_weight: float = 10.0
@@ -119,6 +120,7 @@ class GaussianSplattingModel(Model):
         datamanager,
         **kwargs,
     ) -> None:
+        self.scene_scale = datamanager.train_dataset.depth_unit_scale_factor
         super().__init__(config, scene_box, num_train_data, **kwargs)
         self.datamanager = datamanager
         self.corresponding_idxs = None
@@ -149,7 +151,9 @@ class GaussianSplattingModel(Model):
             config=self.config,
             point_clouds=self.config.point_cloud_sequence,
             background=self.config.background,
-            background_cls=torch.tensor([0])  # hard code for now
+            background_cls=torch.tensor([0]),  # hard code for now
+            pretrained_background=self.config.pretrained_background,
+            scene_scale=self.scene_scale
         )
         self.nframes = len(self.config.point_cloud_sequence)
 
@@ -203,7 +207,7 @@ class GaussianSplattingModel(Model):
         h, w = gt_image.size(0), gt_image.size(1)
 
         # remove background if we didn't render it:
-        if not self.field._render_background and not self.config.no_background:
+        if not self.field._render_background or self.config.no_background:
             background_color = self.field._tmp_background_clr
             background_mask = batch['segmentation'].clone() == 0
             gt_image[background_mask.to(self.device)] = background_color
@@ -243,7 +247,7 @@ class GaussianSplattingModel(Model):
             gt_seg = torch.nn.functional.one_hot(batch['segmentation'].to(self.device).long(), num_classes=num_classes)
             if num_classes > pred_seg.size(2):
                 pred_seg = torch.cat([pred_seg, torch.zeros(h, w, num_classes - pred_seg.size(2)).to(self.device)], dim=2)
-            if not self.field._render_background and not self.config.no_background:
+            if not self.field._render_background or self.config.no_background:
                 gt_seg[gt_seg[..., 0] == 1] = 0  # make background "black"
             gt_seg = F.resize(gt_seg.permute(2, 0, 1), size=[h, w]).permute(1, 2, 0)
             seg_loss = self.config.segmentation_loss_weight * self.l1_loss(pred_seg, gt_seg)
@@ -405,6 +409,48 @@ class GaussianSplattingModel(Model):
         # )
 
         return callbacks
+
+    def eval(self):
+        r"""Sets the module in evaluation mode.
+
+        This has any effect only on certain modules. See documentations of
+        particular modules for details of their behaviors in training/evaluation
+        mode, if they are affected, e.g. :class:`Dropout`, :class:`BatchNorm`,
+        etc.
+
+        This is equivalent with :meth:`self.train(False) <torch.nn.Module.train>`.
+
+        See :ref:`locally-disable-grad-doc` for a comparison between
+        `.eval()` and several similar mechanisms that may be confused with it.
+
+        Returns:
+            Module: self
+        """
+        self.field.eval()
+        return self.train(False)
+
+    def train(self, mode: bool = True):
+        r"""Sets the module in training mode.
+
+        This has any effect only on certain modules. See documentations of
+        particular modules for details of their behaviors in training/evaluation
+        mode, if they are affected, e.g. :class:`Dropout`, :class:`BatchNorm`,
+        etc.
+
+        Args:
+            mode (bool): whether to set training mode (``True``) or evaluation
+                         mode (``False``). Default: ``True``.
+
+        Returns:
+            Module: self
+        """
+        if not isinstance(mode, bool):
+            raise ValueError("training mode is expected to be boolean")
+        self.training = mode
+        for module in self.children():
+            module.train(mode)
+        self.field.train(mode)
+        return self
 
     def render_correspondences(self, camera_ray_bundle, initial_gaussian_idx):
         PREVIOUS_WINDOW = 5

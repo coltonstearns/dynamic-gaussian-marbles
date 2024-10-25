@@ -3,7 +3,7 @@ import importlib
 import json
 
 LR_ARGS_OVERWRITE = ['feature_lr', 'opacity_lr', 'scaling_lr', 'delta_position_lr']
-BACKGROUND_ARGS_OVERWRITE = ['static_background', 'no_background', 'render_background_probability']
+BACKGROUND_ARGS_OVERWRITE = ['static_background', 'no_background', 'render_background_probability', 'pretrained_background']
 LOSS_ARGS_OVERWRITE = ['isometry_loss_weight', 'chamfer_loss_weight',
                        'photometric_loss_weight', 'tracking_loss_weight', 'segmentation_loss_weight',
                        'velocity_smoothing_loss_weight', 'depthmap_loss_weight', 'scaling_loss_weight',
