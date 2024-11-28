@@ -244,7 +244,7 @@ class GaussianSplattingModel(Model):
         if self.config.segmentation_loss_weight > 0:
             pred_seg = outputs['segmentation']  # h, w, K
             num_classes = max(batch['segmentation'].unique().numel(), pred_seg.size(2))
-            gt_seg = torch.nn.functional.one_hot(batch['segmentation'].to(self.device).long(), num_classes=num_classes)
+            gt_seg = torch.nn.functional.one_hot(batch['segmentation'].to(self.device).long(), num_classes=num_classes).squeeze(0)
             if num_classes > pred_seg.size(2):
                 pred_seg = torch.cat([pred_seg, torch.zeros(h, w, num_classes - pred_seg.size(2)).to(self.device)], dim=2)
             if not self.field._render_background or self.config.no_background:

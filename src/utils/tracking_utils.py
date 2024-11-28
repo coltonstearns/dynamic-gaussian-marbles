@@ -86,6 +86,7 @@ class TrackingLoss(nn.Module):
 
         # add in direct depth loss - has Gaussian match both 2D motion and depth motion
         #    Note to self: what if tracking motion is wrong --> we're regularizing these Gaussians to the wrong depth
+        depthmap = depthmap.squeeze(0)
         if depthmap is not None:
             h, w = depthmap.shape
             target_idxs = torch.round(target_particles_gather).long()

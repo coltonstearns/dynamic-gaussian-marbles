@@ -188,7 +188,7 @@ class GaussianSplattingPipeline(VanillaPipeline):
         else:         
             # get index
             idx = self.curr_edit_idx
-            cameras = self.datamanager.train_dataset.cameras
+            cameras = self.datamanager.train_dataset.cameras.to(self.model.device)
             camera, data = self.datamanager.next_train_idx(idx)
             camera_ray_bundle = cameras.generate_rays(camera_indices=idx)
             model_outputs = self.model.get_outputs_for_camera_ray_bundle(camera_ray_bundle)
@@ -217,16 +217,22 @@ class GaussianSplattingPipeline(VanillaPipeline):
             edited_image = edited_image.to(original_image.dtype)
             self.datamanager.train_image_dataloader.cached_collated_batch["image"][idx] = edited_image.squeeze().permute(1,2,0)
             data["image"] = edited_image.squeeze().permute(1,2,0)
-
+            data['depth_image'] = data['depth_image'].squeeze(0)
+            data['segmentation'] = data['segmentation'].squeeze(0)
+            data['tracks'] = data['tracks'].squeeze(0)
+            data['track_mask'] = data['track_mask'].squeeze(0)
+            data['eval_mask'] = data['eval_mask'].squeeze(0)
+            data['track_segs'] = data['track_segs'].squeeze(0)
             #increment curr edit idx
             self.curr_edit_idx += 1
             if (self.curr_edit_idx >= len(self.datamanager.train_image_dataloader.cached_collated_batch)):
                 self.curr_edit_idx = 0
                 self.makeSquentialEdits = False
 
-        loss_dict = self.model.get_loss_dict(model_outputs, data, metrics_dict)
-        
-        return model_outputs, loss_dict, metrics_dict
+            loss_dict = self.model.get_loss_dict(model_outputs, data, metrics_dict, self.datamanager.iter_train_image_dataloader, self.datamanager.train_image_sampler)
+
+
+            return model_outputs, loss_dict, metrics_dict
 
     def step(self):
         # identify if we need to expand our motion scope
