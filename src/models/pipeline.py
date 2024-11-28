@@ -225,7 +225,7 @@ class GaussianSplattingPipeline(VanillaPipeline):
             data['track_segs'] = data['track_segs'].squeeze(0)
             #increment curr edit idx
             self.curr_edit_idx += 1
-            if (self.curr_edit_idx >= len(self.datamanager.train_image_dataloader.cached_collated_batch)):
+            if (self.curr_edit_idx >= len(self.datamanager.train_image_dataloader.cached_collated_batch['image'])):
                 self.curr_edit_idx = 0
                 self.makeSquentialEdits = False
 
