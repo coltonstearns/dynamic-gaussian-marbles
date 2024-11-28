@@ -211,7 +211,7 @@ class GaussianSplattingDataManager(DataManager):
         """Returns the next training batch
 
         Returns a Camera instead of raybundle"""
-        data = deepcopy(self.train_image_dataloader.cached_collated_batch[idx])
+        data = deepcopy({k:self.train_image_dataloader.cached_collated_batch[k][idx].unsqueeze(0) for k in self.train_image_dataloader.cached_collated_batch.keys()})
         data["image"] = data["image"].to(self.device)
 
         assert len(self.train_dataset.cameras.shape) == 1, "Assumes single batch dimension"

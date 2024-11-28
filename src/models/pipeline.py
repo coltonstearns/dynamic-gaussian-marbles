@@ -188,11 +188,14 @@ class GaussianSplattingPipeline(VanillaPipeline):
         else:         
             # get index
             idx = self.curr_edit_idx
+            cameras = self.datamanager.train_dataset.cameras
             camera, data = self.datamanager.next_train_idx(idx)
-            model_outputs = self.model(camera)
+            camera_ray_bundle = cameras.generate_rays(camera_indices=idx)
+            model_outputs = self.model.get_outputs_for_camera_ray_bundle(camera_ray_bundle)
+            #model_outputs = self.model(camera)
             metrics_dict = self.model.get_metrics_dict(model_outputs, data)
 
-            original_image = self.datamanager.original_cached_train[idx]["image"].unsqueeze(dim=0).permute(0, 3, 1, 2)
+            original_image = self.datamanager.original_cached_train["image"][idx].unsqueeze(dim=0).permute(0, 3, 1, 2)
             rendered_image = model_outputs["rgb"].detach().unsqueeze(dim=0).permute(0, 3, 1, 2)
 
             edited_image = self.ip2p.edit_image(
@@ -212,7 +215,7 @@ class GaussianSplattingPipeline(VanillaPipeline):
 
             # write edited image to dataloader
             edited_image = edited_image.to(original_image.dtype)
-            self.datamanager.train_image_dataloader.cached_collated_batch[idx]["image"] = edited_image.squeeze().permute(1,2,0)
+            self.datamanager.train_image_dataloader.cached_collated_batch["image"][idx] = edited_image.squeeze().permute(1,2,0)
             data["image"] = edited_image.squeeze().permute(1,2,0)
 
             #increment curr edit idx
