@@ -78,7 +78,7 @@ train_config = \
             ],
             text_guided=True,
             prompt="change the person to a clown",
-            gs_steps=100
+            gs_steps=2500
 
         ),
         optimizers={
