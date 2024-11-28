@@ -39,3 +39,7 @@ pip install git+https://github.com/nerfstudio-project/gsplat.git@9979ed6
 yes | pip install gdown
 pip install xformers==0.0.20
 pip install git+https://github.com/facebookresearch/co-tracker.git@9ed0531
+
+yes |  pip install transformers
+yes |  pip install diffusers
+yes |  pip install accelerate
