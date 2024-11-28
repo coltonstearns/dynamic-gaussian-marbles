@@ -14,6 +14,7 @@ from typing import (
 )
 
 import torch
+from copy import deepcopy
 
 from nerfstudio.configs.dataparser_configs import AnnotatedDataParserUnion
 from nerfstudio.data.dataparsers.base_dataparser import DataparserOutputs
@@ -55,6 +56,9 @@ class GaussianSplattingDataManagerConfig(DataManagerConfig):
     outlier_std_ratio: float = 2.0
     znear: float = 0.01
     zfar: float = 100.0
+
+    text_guided: bool = False
+    """Whether we are using text-guided editing"""
 
 
 class GaussianSplattingDataManager(DataManager):
@@ -120,6 +124,11 @@ class GaussianSplattingDataManager(DataManager):
                         CONSOLE.print("Variable resolution, using variable_res_collate")
                         self.config.collate_fn = variable_res_collate
                         break
+
+        self.text_guided = self.config.text_guided
+
+
+
         super().__init__()
 
     def load_dataset(self, dataparser_outputs, camera_res_scale_factor):
@@ -149,6 +158,14 @@ class GaussianSplattingDataManager(DataManager):
         self.train_camera_optimizer = self.config.camera_optimizer.setup(
             num_cameras=self.train_dataset.cameras.size, device=self.device
         )
+
+
+        if self.text_guided:
+            self.original_cached_train = deepcopy(self.train_image_dataloader.cached_collated_batch)
+            #self.original_cached_eval = deepcopy(self.cached_eval)
+            
+            # Some logic to make sure we sample every camera in equal amounts
+            self.editing_unseen_cameras = [i for i in range(len(self.train_dataset))]
 
     def setup_eval(self):
         """Sets up the data loader for evaluation"""
@@ -189,6 +206,21 @@ class GaussianSplattingDataManager(DataManager):
         ray_bundle, batch, _ = self.train_image_sampler.sample(image_batch, valid_idxs)
         ray_bundle = ray_bundle.to(self.device)
         return ray_bundle, batch
+    
+    def next_train_idx(self, idx: int):
+        """Returns the next training batch
+
+        Returns a Camera instead of raybundle"""
+        data = deepcopy(self.train_image_dataloader.cached_collated_batch[idx])
+        data["image"] = data["image"].to(self.device)
+
+        assert len(self.train_dataset.cameras.shape) == 1, "Assumes single batch dimension"
+        camera = self.train_dataset.cameras[idx : idx + 1].to(self.device)
+        if camera.metadata is None:
+            camera.metadata = {}
+        camera.metadata["cam_idx"] = idx
+        return camera, data
+
 
     def next_eval(self, step: int) -> Tuple[GaussianSplattingImageBundle, Dict]:
         """Returns the next batch of data from the eval dataloader."""

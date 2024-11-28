@@ -41,6 +41,7 @@ from src.data.datamanager import GaussianSplattingDataManagerConfig, GaussianSpl
 from src.models.model import GaussianSplattingModelConfig
 from src.utils.utils import PHASE_NAMES, PHASE_IDS
 from src.utils.tracking_utils import get_tracking_eval_metrics
+from src.models.ip2p import InstructPix2Pix
 
 # torch.autograd.set_detect_anomaly(True)
 
@@ -57,6 +58,27 @@ class GaussianSplattingPipelineConfig(VanillaPipelineConfig):
     """specifies the model config"""
     stages: typing.List = None
     """specifies the optimization stages of the pipeline"""
+    text_guided: bool = False
+    """whether to use text-guided image editing"""
+    prompt: str = "don't change the image"
+    """prompt for InstructPix2Pix"""
+    guidance_scale: float = 12.5
+    """(text) guidance scale for InstructPix2Pix"""
+    image_guidance_scale: float = 1.5
+    """image guidance scale for InstructPix2Pix"""
+    gs_steps: int = 2500
+    """how many GS steps between dataset updates"""
+    diffusion_steps: int = 20
+    """Number of diffusion steps to take for InstructPix2Pix"""
+    lower_bound: float = 0.7
+    """Lower bound for diffusion timesteps to use for image editing"""
+    upper_bound: float = 0.98
+    """Upper bound for diffusion timesteps to use for image editing"""
+    ip2p_device: Optional[str] = None
+    """Second device to place InstructPix2Pix on. If None, will use the same device as the pipeline"""
+    ip2p_use_full_precision: bool = False
+    """Whether to use full precision for InstructPix2Pix"""
+
 
 
 class GaussianSplattingPipeline(VanillaPipeline):
@@ -72,6 +94,7 @@ class GaussianSplattingPipeline(VanillaPipeline):
         world_size: int = 1,
         local_rank: int = 0,
         grad_scaler: Optional[GradScaler] = None,
+        
     ):
         Pipeline.__init__(self)
         self.config = config
@@ -121,6 +144,19 @@ class GaussianSplattingPipeline(VanillaPipeline):
         self.register_buffer("background_sequence_length", torch.tensor(1))
 
         self._step_stage()
+        self.text_guided = self.config.text_guided
+
+        if self.text_guided:
+            self.ip2p_device = torch.device(device)
+            self.ip2p = InstructPix2Pix(self.ip2p_device, ip2p_use_full_precision=self.config.ip2p_use_full_precision)
+
+            self.text_embedding = self.ip2p.pipe._encode_prompt(
+            self.config.prompt, device=self.ip2p_device, num_images_per_prompt=1, do_classifier_free_guidance=True, negative_prompt=""
+            )
+            # which image index we are editing
+            self.curr_edit_idx = 0
+            # whether we are doing regular GS updates or editing images
+            self.makeSquentialEdits = False
 
     @profiler.time_function
     def get_train_loss_dict(self, step: int):
@@ -131,18 +167,62 @@ class GaussianSplattingPipeline(VanillaPipeline):
         Args:
             step: current iteration step to update sampler if using DDP (distributed)
         """
-        # Update our motion's stage
-        if self.training:
-            self.step()
+        if ((step-1) % self.config.gs_steps) == 0:
+                self.makeSquentialEdits = True
 
-        # given the stage, find and train on activate frames
-        active_frames = self.model.randselect_active_training_frames()
-        ray_bundle, batch = self.datamanager.next_train(step, active_frames)
+        if not self.text_guided or not self.makeSquentialEdits:
+            # Update our motion's stage
+            if self.training:
+                self.step()
 
-        # get model outputs, loss, and metrics
-        model_outputs = self._model(ray_bundle)  # train distributed data parallel model if world_size > 1
-        metrics_dict = self.model.get_metrics_dict(model_outputs, batch)
-        loss_dict = self.model.get_loss_dict(model_outputs, batch, metrics_dict, self.datamanager.iter_train_image_dataloader, self.datamanager.train_image_sampler)
+            # given the stage, find and train on activate frames
+            active_frames = self.model.randselect_active_training_frames()
+            ray_bundle, batch = self.datamanager.next_train(step, active_frames)
+
+            # get model outputs, loss, and metrics
+            model_outputs = self._model(ray_bundle)  # train distributed data parallel model if world_size > 1
+            metrics_dict = self.model.get_metrics_dict(model_outputs, batch)
+            loss_dict = self.model.get_loss_dict(model_outputs, batch, metrics_dict, self.datamanager.iter_train_image_dataloader, self.datamanager.train_image_sampler)
+            return model_outputs, loss_dict, metrics_dict
+
+        else:         
+            # get index
+            idx = self.curr_edit_idx
+            camera, data = self.datamanager.next_train_idx(idx)
+            model_outputs = self.model(camera)
+            metrics_dict = self.model.get_metrics_dict(model_outputs, data)
+
+            original_image = self.datamanager.original_cached_train[idx]["image"].unsqueeze(dim=0).permute(0, 3, 1, 2)
+            rendered_image = model_outputs["rgb"].detach().unsqueeze(dim=0).permute(0, 3, 1, 2)
+
+            edited_image = self.ip2p.edit_image(
+                        self.text_embedding.to(self.ip2p_device),
+                        rendered_image.to(self.ip2p_device),
+                        original_image.to(self.ip2p_device),
+                        guidance_scale=self.config.guidance_scale,
+                        image_guidance_scale=self.config.image_guidance_scale,
+                        diffusion_steps=self.config.diffusion_steps,
+                        lower_bound=self.config.lower_bound,
+                        upper_bound=self.config.upper_bound,
+                    )
+
+            # resize to original image size (often not necessary)
+            if (edited_image.size() != rendered_image.size()):
+                edited_image = torch.nn.functional.interpolate(edited_image, size=rendered_image.size()[2:], mode='bilinear')
+
+            # write edited image to dataloader
+            edited_image = edited_image.to(original_image.dtype)
+            self.datamanager.train_image_dataloader.cached_collated_batch[idx]["image"] = edited_image.squeeze().permute(1,2,0)
+            data["image"] = edited_image.squeeze().permute(1,2,0)
+
+            #increment curr edit idx
+            self.curr_edit_idx += 1
+            if (self.curr_edit_idx >= len(self.datamanager.train_image_dataloader.cached_collated_batch)):
+                self.curr_edit_idx = 0
+                self.makeSquentialEdits = False
+
+        loss_dict = self.model.get_loss_dict(model_outputs, data, metrics_dict)
+        
         return model_outputs, loss_dict, metrics_dict
 
     def step(self):
@@ -538,3 +618,5 @@ class GaussianSplattingPipeline(VanillaPipeline):
             module.train(mode)
         self._model.train(mode)
         return self
+    
+
