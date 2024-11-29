@@ -171,12 +171,13 @@ class GaussianSplattingModel(Model):
         return outputs
 
     @torch.no_grad()
-    def get_outputs_for_camera_ray_bundle(self, camera_ray_bundle: [GaussianSplattingImageBundle, RayBundle]) -> Dict[str, torch.Tensor]:
+    def get_outputs_for_camera_ray_bundle(self, camera_ray_bundle: [GaussianSplattingImageBundle, RayBundle], t=None) -> Dict[str, torch.Tensor]:
         # Note: the viewer will pass in a standard NeRF camera ray bundle, so we must convert it!
         correspondences = None
         if isinstance(camera_ray_bundle, RayBundle):
             tracking_tstep = camera_ray_bundle.metadata.get('viz_tracking', None)
-            camera_ray_bundle = nerfstudio_bundle_to_gsplatting_camera(camera_ray_bundle, self.nframes)
+            t = t+1 if t is not None else self.nframes
+            camera_ray_bundle = nerfstudio_bundle_to_gsplatting_camera(camera_ray_bundle, t)
         else:
             tracking_tstep = None
 

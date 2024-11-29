@@ -219,7 +219,8 @@ class GaussianSplattingDataManager(DataManager):
         if camera.metadata is None:
             camera.metadata = {}
         camera.metadata["cam_idx"] = idx
-        return camera, data
+        image_idx = data['image_idx']
+        return camera, data, image_idx
 
 
     def next_eval(self, step: int) -> Tuple[GaussianSplattingImageBundle, Dict]:
