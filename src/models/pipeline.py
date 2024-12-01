@@ -217,6 +217,8 @@ class GaussianSplattingPipeline(VanillaPipeline):
             if (edited_image.size() != rendered_image.size()):
                 edited_image = torch.nn.functional.interpolate(edited_image, size=rendered_image.size()[2:], mode='bilinear')
 
+            #from PIL import Image
+            #Image.fromarray((edited_image.squeeze().permute(1,2,0).cpu().numpy() * 255).astype(np.uint8)).save(f"render_debug/{idx}-{step}.png")
             # write edited image to dataloader
             edited_image = edited_image.to(original_image.dtype)
             self.datamanager.train_image_dataloader.cached_collated_batch["image"][idx] = edited_image.squeeze().permute(1,2,0)
