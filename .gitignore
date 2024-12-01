@@ -14,3 +14,4 @@ external/co-tracker/
 external/nerfplayer-nerfstudio/
 external/simple-knn/
 external/splatting
+render_debug
