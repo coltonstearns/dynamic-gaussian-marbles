@@ -182,7 +182,7 @@ class GaussianSplattingPipeline(VanillaPipeline):
             # get model outputs, loss, and metrics
             model_outputs = self._model(ray_bundle)  # train distributed data parallel model if world_size > 1
             metrics_dict = self.model.get_metrics_dict(model_outputs, batch)
-            loss_dict = self.model.get_loss_dict(model_outputs, batch, metrics_dict, self.datamanager.iter_train_image_dataloader, self.datamanager.train_image_sampler)
+            loss_dict = self.model.get_loss_dict(model_outputs, batch, metrics_dict, self.datamanager.iter_train_image_dataloader, self.datamanager.train_image_sampler, ray_bundle)
             return model_outputs, loss_dict, metrics_dict
 
         else:         

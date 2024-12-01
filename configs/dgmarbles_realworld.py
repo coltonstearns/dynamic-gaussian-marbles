@@ -38,6 +38,7 @@ train_config = \
                 isometry_knn=24,
                 isometry_knn_radius=0.3,
                 isometry_loss_weight=0.4,
+                consistency_loss_weight=0.05,
                 isometry_weight_background_factor=1.0,
                 lpips_loss_weight=0.002,
                 number_of_gaussians=300000,

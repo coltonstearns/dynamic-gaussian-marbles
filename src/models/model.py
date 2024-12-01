@@ -7,10 +7,11 @@ from typing import Dict, List, Tuple, Type
 
 import torchvision.transforms
 from torchvision.transforms import functional as F
-import torch.nn.functional
+import torch.nn.functional as FT
 from torch import Tensor
 import wandb
 import time
+from copy import deepcopy
 
 import numpy as np
 import torch
@@ -70,6 +71,7 @@ class GaussianSplattingModelConfig(ModelConfig):
     depthmap_loss_weight: float = 0.2
     lpips_loss_weight: float = 0.0
     instance_isometry_loss_weight: float = 2.0
+    consistency_loss_weight: float = 0.0
     tracking_depth_loss_weight: float = 2.0
 
     # loss terms - not used in final model
@@ -202,7 +204,7 @@ class GaussianSplattingModel(Model):
         metrics_dict = {}
         return metrics_dict
 
-    def get_loss_dict(self, outputs, batch, metrics_dict=None, dataloader=None, data_sampler=None):
+    def get_loss_dict(self, outputs, batch, metrics_dict=None, dataloader=None, data_sampler=None, ray_bundle=None):
         # compute l1 loss
         gt_image = batch["image"].to(self.device).squeeze(0).clone()
         h, w = gt_image.size(0), gt_image.size(1)
@@ -326,8 +328,29 @@ class GaussianSplattingModel(Model):
             scaling_loss = self.field.compute_scaling_loss()
             scaling_loss = self.config.scaling_loss_weight * scaling_loss
 
+
+        consistency_loss = torch.zeros(1).to(chamfer_loss)
+        if self.config.consistency_loss_weight > 0 and ray_bundle is not None:
+            random_t = (torch.randn(3) * 0.002).to(chamfer_loss)
+            dx, dy = self.compute_pixel_translation(ray_bundle, random_t)
+            translated_ray_bundle = deepcopy(ray_bundle)
+            translated_ray_bundle.camera_center += torch.tensor(random_t, dtype=torch.float32).to(translated_ray_bundle.camera_center.device)
+            t_tensor = torch.tensor(random_t, dtype=torch.float32).to(translated_ray_bundle.nstudio_c2w.device).unsqueeze(-1)  # Shape (3, 1)
+            translated_ray_bundle.nstudio_c2w[..., :3, 3] += t_tensor.squeeze(-1)
+            translated_ray_bundle.world_view_transform[..., :3, 3] += t_tensor.squeeze(-1)
+
+            translated_bundle_out = self.field(translated_ray_bundle)
+            
+            translated_output = self.translate_image(outputs["rgb"], dx, dy)
+            # translated mask marking out the pixels that should not be counted for loss because they are outside the image
+            translated_mask = self.translate_image(torch.ones_like(outputs["rgb"]), dx, dy)
+
+            consistency_loss = torch.mean(torch.abs(translated_output - translated_bundle_out["rgb"]) * translated_mask)
+
+            consistency_loss = self.config.consistency_loss_weight * consistency_loss
+
         # perform backward pass
-        loss = photometric_loss + isometry_loss + chamfer_loss + tracking_loss + depth_loss + velocity_smoothing_loss + lpips_loss + instance_iso_loss + scaling_loss + tracking_depth_loss
+        loss = photometric_loss + isometry_loss + chamfer_loss + tracking_loss + depth_loss + velocity_smoothing_loss + lpips_loss + instance_iso_loss + scaling_loss + tracking_depth_loss + consistency_loss
         loss.backward(retain_graph=False)
 
         # record losses
@@ -344,6 +367,7 @@ class GaussianSplattingModel(Model):
         loss_dict["lpips_loss"] = lpips_loss
         loss_dict["scaling_loss"] = scaling_loss
         loss_dict["tracking_depth_loss"] = tracking_depth_loss
+        loss_dict["consistency_loss"] = consistency_loss
 
         # log losses into wandb every 10 steps (because there are so many steps)
         global WANDB_LOG_STEP
@@ -486,6 +510,109 @@ class GaussianSplattingModel(Model):
     def compute_correspondences(self):
         corresponding_idxs = self.glue_correspondences()
         self.corresponding_idxs = corresponding_idxs
+
+    def translate_image(self, image, dx, dy):
+        """
+        Translate a 2D RGB image by [dx, dy].
+
+        Args:
+            image: A torch tensor of shape (H, W, 3) representing the RGB image.
+            dx: The translation in the x-direction (pixels).
+            dy: The translation in the y-direction (pixels).
+
+        Returns:
+            Translated image tensor of shape (H, W, 3).
+        """
+        # Ensure the image has a batch and channel dimension
+        if image.dim() == 3:
+            image = image.permute(2, 0, 1).unsqueeze(0)  # Shape: (1, 3, H, W)
+
+        # Get image dimensions
+        _, _, H, W = image.shape
+
+        # Create normalized grid
+        y, x = torch.meshgrid(
+            torch.linspace(-1, 1, H, device=image.device),
+            torch.linspace(-1, 1, W, device=image.device),
+            indexing='ij'
+        )
+        grid = torch.stack((x, y), dim=-1)  # Shape: (H, W, 2)
+
+        # Compute normalized translation
+        norm_dx = dx / (W / 2)
+        norm_dy = dy / (H / 2)
+
+        # Apply the translation to the grid
+        translated_grid = grid.clone()
+        translated_grid[..., 0] -= norm_dx  # x-coordinate
+        translated_grid[..., 1] -= norm_dy  # y-coordinate
+
+        # Apply the grid transformation using grid_sample
+        translated_image = FT.grid_sample(
+            image,
+            translated_grid.unsqueeze(0),  # Add batch dimension
+            mode='bilinear',
+            padding_mode='zeros',
+            align_corners=True
+        )
+
+        # Remove batch and channel dimensions if necessary
+        translated_image = translated_image.squeeze(0).permute(1, 2, 0)  # Shape: (H, W, 3)
+
+        return translated_image
+    
+    def compute_pixel_translation(self, ray_bundle, t):
+        """
+        Compute the 2D pixel translation [dx, dy] caused by a 3D translation t=[x, y, z].
+        
+        Args:
+            ray_bundle: An instance of RayBundle with the required attributes.
+            t: A 3D translation vector [x, y, z] (Tensor of shape (3,)).
+        
+        Returns:
+            dx, dy: The 2D pixel translation caused by the 3D translation.
+        """
+        # Extract attributes
+        fx, fy = ray_bundle.fx, ray_bundle.fy
+        cx, cy = ray_bundle.cx, ray_bundle.cy
+        c2w = ray_bundle.nstudio_c2w  # Camera-to-world matrix (batch x 4 x 4)
+        camera_center = ray_bundle.camera_center  # Camera center in world space (batch x 3)
+        
+        # Convert translation t to a tensor if not already
+        t = torch.tensor(t, dtype=torch.float32).to(camera_center.device)
+
+        # Transform the camera center by the translation t
+        translated_camera_center = camera_center + t
+
+        # Project original camera center to 2D
+        camera_center_h = torch.cat([camera_center, torch.ones_like(camera_center[..., :1])], dim=-1)  # Homogeneous coords
+        camera_center_proj = c2w @ camera_center_h.unsqueeze(-1)  # Shape: (batch x 4 x 1)
+        camera_center_proj = camera_center_proj.squeeze(-1)  # Shape: (batch x 4)
+
+        # Apply projection (normalized device coordinates -> pixel coordinates)
+        x_ndc = camera_center_proj[..., 0] / camera_center_proj[..., 2]
+        y_ndc = camera_center_proj[..., 1] / camera_center_proj[..., 2]
+        x_pixel = fx * x_ndc + cx
+        y_pixel = fy * y_ndc + cy
+        original_pixel = torch.stack([x_pixel, y_pixel], dim=-1)
+    
+        # Project translated camera center to 2D
+        translated_center_h = torch.cat([translated_camera_center, torch.ones_like(translated_camera_center[..., :1])], dim=-1)
+        translated_center_proj = c2w @ translated_center_h.unsqueeze(-1)  # Shape: (batch x 4 x 1)
+        translated_center_proj = translated_center_proj.squeeze(-1)  # Shape: (batch x 4)
+
+        x_ndc_t = translated_center_proj[..., 0] / translated_center_proj[..., 2]
+        y_ndc_t = translated_center_proj[..., 1] / translated_center_proj[..., 2]
+        x_pixel_t = fx * x_ndc_t + cx
+        y_pixel_t = fy * y_ndc_t + cy
+        translated_pixel = torch.stack([x_pixel_t, y_pixel_t], dim=-1)
+
+        # Compute the 2D pixel translation
+        pixel_translation = translated_pixel - original_pixel
+        dx, dy = pixel_translation[..., 0], pixel_translation[..., 1]
+
+        return dx, dy
+
 
     def glue_correspondences(self, context_frames=4, start_frame_idx=0):
         # find gaussian idx to start from
