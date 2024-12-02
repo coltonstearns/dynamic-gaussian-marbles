@@ -78,7 +78,7 @@ train_config = \
                 {'type': 'global-adjust', 'steps': 64},
             ],
             text_guided=True,
-            prompt="change the person to a clown. make him have a red nose, read hair, white face, red and white striped shirt, and blue pants, red shoes.",
+            prompt="change the person to a clown and don't change his height. don't change anything else in the scene.",
             gs_steps=2500
 
         ),
