@@ -7,6 +7,78 @@ from pathlib import Path
 import math
 
 
+def load_training_cameras(camera_dir, scene_scale):
+    fnames = sorted(os.listdir(camera_dir))
+    cameras = []
+    for fname in fnames:
+        # load camera json
+        with open(os.path.join(camera_dir, fname)) as f:
+            camera_data = json.load(f)
+
+        # extract data
+        w, h = camera_data['image_size']
+        orientation = np.array(camera_data['orientation']).reshape(3,3)  # len 9 list
+        position = np.array(camera_data['position'])  # len 3 list
+        fov = 2 * math.atan(h / (2 * camera_data['focal_length']))
+        fov = fov * 180 / np.pi
+
+
+        # format position and orientation
+        orientation = orientation.T
+        position *= scene_scale
+        camera_to_world = np.eye(4)
+        camera_to_world[:3, :3] = orientation
+        camera_to_world[:3, 3] = position
+        camera_to_world[0:3, 1:3] *= -1
+        camera_to_world[2, :] *= -1  # invert world z
+        camera_to_world = camera_to_world[[0, 2, 1, 3], :]  # switch y and z
+
+        # create template camera
+        camera = {'camera_to_world': camera_to_world.flatten().tolist(), 'fov': fov, 'aspect': w/h}
+        cameras.append(camera)
+
+    return cameras
+
+
+def get_nvs_extrinsic_motion(camera, fps, novelview_radius):
+    nvs_extrinsics = []
+
+    # start with zoom in for 2 seconds
+    zoom_nframes = fps
+    orig_extrinsics = np.array(camera['camera_to_world']).reshape((4, 4)).copy()
+    zoomed_in_extrinsics = orig_extrinsics.copy()
+    zoomed_in_extrinsics[1, 3] += novelview_radius
+    nvs_extrinsics += linear_interpolate_camera(orig_extrinsics, zoomed_in_extrinsics, zoom_nframes)
+    nvs_extrinsics += linear_interpolate_camera(zoomed_in_extrinsics, orig_extrinsics, zoom_nframes)
+
+    # then zoom out for 2 seconds
+    zoomed_out_extrinsics = np.array(camera['camera_to_world']).reshape((4, 4)).copy()
+    zoomed_out_extrinsics[1, 3] -= novelview_radius
+    nvs_extrinsics += linear_interpolate_camera(orig_extrinsics, zoomed_out_extrinsics, zoom_nframes)
+    nvs_extrinsics += linear_interpolate_camera(zoomed_out_extrinsics, orig_extrinsics, zoom_nframes)
+
+    # then move camera right quickly
+    move_right_extrinsics = np.array(camera['camera_to_world']).reshape((4, 4)).copy()
+    move_right_extrinsics[0, 3] += novelview_radius
+    nvs_extrinsics += linear_interpolate_camera(orig_extrinsics, move_right_extrinsics, fps // 2)
+
+    # next, spiral camera
+    spiral_nframes = fps * 2
+    for j in range(spiral_nframes):
+        angle = 2 * np.pi * (j / spiral_nframes)
+        spiral_extrinsics = np.array(camera['camera_to_world']).reshape((4, 4)).copy()
+        spiral_extrinsics[0, 3] += novelview_radius * np.cos(angle)
+        spiral_extrinsics[2, 3] += novelview_radius * np.sin(angle)
+        nvs_extrinsics.append(spiral_extrinsics)
+
+    # then move camera back to center
+    nvs_extrinsics += linear_interpolate_camera(move_right_extrinsics, orig_extrinsics, fps // 2)
+
+    return nvs_extrinsics
+
+
+
+
 def linear_interpolate_camera(cam1, cam2, nframes):
     out = []
     for i in range(nframes):
@@ -60,101 +132,82 @@ if __name__ == "__main__":
     fov = 2 * math.atan(h / (2 * camera_data['focal_length']))
     fov = fov * 180 / np.pi
 
-    # get scene info
+    # get scene info and cameras
     with open(os.path.join(args.data_dir, "scene.json"), 'r') as f:
         scene_dict = json.load(f)
-    center = np.array(scene_dict["center"], dtype=np.float32)
     scale = scene_dict["scale"]
-    near = scene_dict["near"]
-    far = scene_dict["far"]
+    cameras = load_training_cameras(camera_dir, scale)
 
-    # format position and orientation
-    orientation = orientation.T
-    position -= center
-    bbox_size, dataparse_scalefactor = 1.5, 4.0
-    position *= bbox_size / 4 / far * dataparse_scalefactor
-    camera_to_world = np.eye(4)
-    camera_to_world[:3, :3] = orientation
-    camera_to_world[:3, 3] = position
-    camera_to_world[0:3, 1:3] *= -1
-    camera_to_world[2, :] *= -1  # invert world z
-    camera_to_world = camera_to_world[[0, 2, 1, 3], :]  # switch y and z
-
-    # create template camera
-    camera_template = {'camera_to_world': camera_to_world.flatten().tolist(), 'fov': fov, 'aspect': w/h}
-    camera_loc_template = camera_to_world
-
-    # create nerfstudio camera dict
-    all_cameras = {'camera_type': 'perspective', 'render_height': h, 'render_width': w,
-                   'fps': args.fps, 'crop': None}
-    # camera_template = copy.deepcopy(CAMERA_TEMPLATE_NVIDIA) if args.nvidia_dataset else copy.deepcopy(CAMERA_TEMPLATE)
-    # camera_template['aspect'] = args.width / args.height
-    # camera_template['fov'] = args.fov
-
+    # load list of training images
     image_dir = os.path.join(args.data_dir, "rgb", "1x")
     rgbs = sorted(os.listdir(image_dir))
     rgbs = [rgb for rgb in rgbs if rgb.startswith('0')]
-    for novel_frame in args.novelview_frame:
-        camera_path = []
-        assert novel_frame < len(rgbs), f"novelview_frame {novel_frame} is greater than number of frames {len(rgbs)}"
 
+    # ==============================================================
+    # create static novel view synthesis cameras
+    all_cameras = {'camera_type': 'perspective', 'render_height': h, 'render_width': w,
+                   'fps': args.fps, 'crop': None}
+    for keyframe in args.novelview_frame:
+        camera_trajectory = []
+        assert keyframe < len(rgbs), f"Novel view frame {keyframe} is greater than number of frames {len(rgbs)}"
         for i in range(len(rgbs)):
             # append training view camera
             time = i / len(rgbs)
-            camera = copy.deepcopy(camera_template)
+            camera = copy.deepcopy(cameras[i])
             camera['render_time'] = time
-            camera_path.append(camera)
+            camera_trajectory.append(camera)
 
             # if we're at our novel view timeframe, create zoom in/out as well as spiral effect
-            if i == novel_frame:
-                novelview_cameras = []
-
-                # start with zoom in for 2 seconds
-                zoom_nframes = args.fps
-                camera_loc = camera_loc_template.copy()
-                zoomed_in_camera = camera_loc_template.copy()
-                zoomed_in_camera[1, 3] += args.novelview_radius
-                novelview_cameras += linear_interpolate_camera(camera_loc, zoomed_in_camera, zoom_nframes)
-                novelview_cameras += linear_interpolate_camera(zoomed_in_camera, camera_loc, zoom_nframes)
-
-                # then zoom out for 2 seconds
-                zoomed_out_camera = camera_loc_template.copy()
-                zoomed_out_camera[1, 3] -= args.novelview_radius
-                novelview_cameras += linear_interpolate_camera(camera_loc, zoomed_out_camera, zoom_nframes)
-                novelview_cameras += linear_interpolate_camera(zoomed_out_camera, camera_loc, zoom_nframes)
-
-                # then move camera right quickly
-                move_right_camera = camera_loc_template.copy()
-                move_right_camera[0, 3] += args.novelview_radius
-                novelview_cameras += linear_interpolate_camera(camera_loc, move_right_camera, args.fps//2)
-
-                # next, spiral camera
-                spiral_nframes = args.fps * 2
-                for j in range(spiral_nframes):
-                    angle = 2 * np.pi * (j / spiral_nframes)
-                    spiral_camera = camera_loc_template.copy()
-                    spiral_camera[0, 3] += args.novelview_radius * np.cos(angle)
-                    spiral_camera[2, 3] += args.novelview_radius * np.sin(angle)
-                    novelview_cameras.append(spiral_camera)
-
-                # then move camera back to center
-                novelview_cameras += linear_interpolate_camera(move_right_camera, camera_loc, args.fps//2)
+            if i == keyframe:
+                nvs_extrinsics = get_nvs_extrinsic_motion(camera, args.fps, args.novelview_radius)
 
                 # append novelview cameras to camera path
-                for novelview_camera in novelview_cameras:
-                    camera = copy.deepcopy(camera_template)
-                    camera['camera_to_world'] = novelview_camera.flatten().tolist()
-                    camera['render_time'] = time
-                    camera_path.append(camera)
+                for extrinsics in nvs_extrinsics:
+                    nvs_camera = copy.deepcopy(camera)
+                    nvs_camera['camera_to_world'] = extrinsics.flatten().tolist()
+                    nvs_camera['render_time'] = time
+                    camera_trajectory.append(nvs_camera)
 
-        all_cameras['camera_path'] = camera_path
-        seconds = len(camera_path) / args.fps
+        all_cameras['camera_path'] = camera_trajectory
+        seconds = len(camera_trajectory) / args.fps
         all_cameras['seconds'] = seconds
 
         # write to file
-        outname = args.outname.replace('.json', '') + '_%sKF' % novel_frame
+        outname = args.outname.replace('.json', '') + '_%sKF' % keyframe
         outname = os.path.join(args.data_dir, 'camera_paths', outname)
         with open(outname + '.json', 'w') as f:
             json.dump(all_cameras, f, indent=4)
+
+
+    # ==============================================================
+    # create spiral camera trajectory
+    all_cameras = {'camera_type': 'perspective', 'render_height': h, 'render_width': w,
+                   'fps': args.fps, 'crop': None}
+    camera_trajectory = []
+    assert keyframe < len(rgbs), f"Novel view frame {keyframe} is greater than number of frames {len(rgbs)}"
+    spiral_nframes = len(rgbs) // 3
+    for i in range(len(rgbs)):
+        # load training view camera
+        time = i / len(rgbs)
+        camera = copy.deepcopy(cameras[i])
+        camera['render_time'] = time
+
+        # augment by spiral offset
+        angle = 2 * np.pi * (i / spiral_nframes)
+        spiral_extrinsics = np.array(camera['camera_to_world']).reshape((4, 4)).copy()
+        spiral_extrinsics[0, 3] += args.novelview_radius * np.cos(angle)
+        spiral_extrinsics[2, 3] += args.novelview_radius * np.sin(angle)
+        camera['camera_to_world'] = spiral_extrinsics.flatten().tolist()
+        camera_trajectory.append(camera)
+
+    all_cameras['camera_path'] = camera_trajectory
+    seconds = len(camera_trajectory) / args.fps
+    all_cameras['seconds'] = seconds
+
+    # write to file
+    outname = args.outname.replace('.json', '') + '_spiral'
+    outname = os.path.join(args.data_dir, 'camera_paths', outname)
+    with open(outname + '.json', 'w') as f:
+        json.dump(all_cameras, f, indent=4)
 
 
