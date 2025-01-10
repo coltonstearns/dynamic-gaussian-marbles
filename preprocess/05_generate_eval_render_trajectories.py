@@ -104,6 +104,10 @@ if __name__ == "__main__":
         default='./data',
     )
     parser.add_argument(
+        "--camera_dir",
+        default='./data',
+    )
+    parser.add_argument(
         "--novelview_frame",
         default=0,
         type=int,
@@ -122,7 +126,7 @@ if __name__ == "__main__":
     os.makedirs(os.path.join(args.data_dir, 'camera_paths'), exist_ok=True)
 
     # get camera info
-    camera_dir = os.path.join(args.data_dir, 'camera')
+    camera_dir = args.camera_dir
     camera_fname = os.listdir(camera_dir)[0]
     with open(os.path.join(camera_dir, camera_fname)) as f:
         camera_data = json.load(f)
